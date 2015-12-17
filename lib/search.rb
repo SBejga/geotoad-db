@@ -88,6 +88,15 @@ class SearchCache
     @notyetfound = false
   end
 
+  # mongo: user query search
+  def getUserquery
+    if @userquery
+      return @userquery
+    else
+      return ''
+    end
+  end
+
   def txfilter=(cacheType)
     # may return nil if not found
     @txfilter = @cachetypetx[cacheType]
@@ -130,9 +139,14 @@ class SearchCache
       lon = sprintf("%2.6f", lon).gsub(/0{1,5}$/, '')
       @search_url = @@base_url + "?lat=#{lat}&lng=#{lon}"
 
+    # mongo: 
+    @userquery = ''
+
     when 'user'
       @query_type = 'ul'
       @ttl = 20 * 3600
+      # mongo:
+      @userquery = key
 
     when 'owner'
       @query_type = 'u'

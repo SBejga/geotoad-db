@@ -4,3 +4,7 @@
 /tools/build/geotoad_*
 /tools/build/md5sums.*
 /tools/build/Packages.*
+
+# intellij/rubymine
+.idea/*
+.idea/misc.xml

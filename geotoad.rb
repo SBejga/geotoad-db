@@ -36,6 +36,9 @@ require 'zlib'
 require 'cgi'
 require 'net/https' # for openssl
 
+#mongodb extension
+require 'mongodb'
+
 class GeoToad
 
   include Common
@@ -419,6 +422,12 @@ class GeoToad
       end
 
       waypoints = search.getResults()
+     # mongo: geotoaderdb
+     @userquery = search.getUserquery
+     if @userquery
+        displayMessage "Performing query by username, saving username context for database: #{@userquery}"
+     end 
+      
       # this gives us support for multiple searches. It adds together the search.waypoints hashes
       # and pops them into the @combinedWaypoints hash.
       @combinedWaypoints.update(waypoints)
@@ -678,6 +687,9 @@ class GeoToad
     @detail.preserve = @preserveCache
     token = 0
 
+    # mongo: create mongo connection
+    geotoader = Geotoaderdb.new()
+
     wpFiltered.each_key{ |wid|
       token = token + 1
       detailURL = @detail.fullURL(wid)
@@ -745,6 +757,9 @@ class GeoToad
         wpFiltered.delete(wid)
         page.invalidate()
       end
+
+      # mongo: hand over to db handler
+      geotoader.savetodb(wpFiltered[wid], wid, @userquery)
     }
   end
 
