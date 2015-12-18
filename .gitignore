@@ -5,6 +5,15 @@
 /tools/build/md5sums.*
 /tools/build/Packages.*
 
+# Mac
+.DS_Store
+
+# Mongodb
+DB_GEOTOAD/
+
+# created gpx files
+*.gpx
+
 # intellij/rubymine
 .idea/*
 .idea/misc.xml
