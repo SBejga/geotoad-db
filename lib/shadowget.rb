@@ -25,7 +25,7 @@ class ShadowFetch
     @url = url
     @remote = 0
     @localExpiry = 5 * 86400		# 5 days
-    @maxFailures = 3			#was 2
+    @maxFailures = 10			#was 3
     @useCookie   = true
     @httpHeaders = {
       'User-Agent'      => "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_2; en-US) AppleWebKit/532.9 (KHTML, like Gecko) Chrome/5.0.307.11 Safari/532.9",
@@ -215,9 +215,7 @@ class ShadowFetch
         @@src = 'local+remote'
       end
     end
-    if not dowrite
-      displayWarning "Merging current PMO with non-PMO cache file!"
-    else
+    if dowrite
       debug "writing #{localfile}"
       begin
         cache = File.open(localfile, File::WRONLY|File::TRUNC|File::CREAT, 0666)
@@ -226,6 +224,8 @@ class ShadowFetch
       rescue
         displayWarning "Could not overwrite #{localfile}!"
       end
+    #else
+    #  displayWarning "Merging current PMO with non-PMO cache file!"
     end
     debug3 "Returning #{@data.length} bytes: #{@data[0..20]}(...)#{data[-21..-1]}"
     return @data
@@ -420,6 +420,7 @@ class ShadowFetch
   def fetchGuid (wid)
     debug "Running GCCodeLookup for [#{wid}]"
     # found via wireshark
+    # 20151202: must still be http, not https - may fail in the long run!
     url_str = "http://www.geocaching.com/seek/cache_details.aspx/GCCodeLookup"
     uri = URI.parse(url_str)
     if ENV['HTTP_PROXY']
@@ -446,7 +447,7 @@ class ShadowFetch
     begin
         postString = "{\"gcCode\":\"#{wid}\"}"
         @httpHeaders['Content-Type'] = "application/json; charset=UTF-8"
-        @httpHeaders['Referer'] = "http://www.geocaching.com/seek/cache_details.aspx?wp=GC1"
+        @httpHeaders['Referer'] = "https://www.geocaching.com/seek/cache_details.aspx?wp=GC1"
         resp = http.post(query, postString, @httpHeaders)
     rescue Timeout::Error => e
       success = false
@@ -458,8 +459,12 @@ class ShadowFetch
       success = false
       displayWarning "Cannot connect to #{uri.host}:#{uri.port}: #{e}"
     end
-    debug3 "Response: #{resp.body}"
-    return resp.body
+    if success
+      debug3 "Response: #{resp.body}"
+      return resp.body
+    else
+      return nil
+    end
   end
 
 
