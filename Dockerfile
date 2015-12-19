@@ -12,12 +12,9 @@ RUN apk update && \
     apk add $RUBY_PACKAGES && \
     rm -rf /var/cache/apk/*
 
-RUN mkdir /usr/app
+RUN mkdir /usr/app && \
+	gem install mongo
+
+VOLUME /usr/app
 WORKDIR /usr/app
-
-COPY Gemfile /usr/app/
-RUN gem install mongo
-# RUN bundle install
-
-COPY . /usr/app
 

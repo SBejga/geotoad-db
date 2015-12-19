@@ -30,8 +30,29 @@ or to set custom password:
 or on mac (running in a docker-machine)
 
 	mongo admin -u admin -p mypass --host $(docker-machine ip default)
+	
+create user and rights
+
+	use admin
+	db.createUser(
+		 {
+		   user: "geotoad",
+		   pwd: "geotoad",
+		   roles: [
+			  { role: "readWrite", db: "geotoad" }
+			]
+		 }
+	)
+	
+	db.dropUser("geotoad")
+	
+	Reminder:
+	mongo admin -u admin -p mypass --host $(docker-machine ip default) --eval 'db.createUser({user: "geotoad", pwd: "geotoad", roles: [{ role: "readWrite", db: "geotoad" }]});'
+	
 
 ## Geotoaddb Container
+
+The Dockerfile will build an alpine image with ruby and installed 'mongo' gem
 
 # build ruby app image to run 
 
@@ -39,20 +60,20 @@ or on mac (running in a docker-machine)
 	
 # Run
 	
-	docker run -it --rm --name geotoaddb sbejga/rubyapp ./geotoad.rb
+	docker run -it --rm --name geotoaddb --link mongodb -v $PWD:/usr/app sbejga/rubyapp ./geotoad.rb
 	
 or enter shell and run there
 
-	docker run -it --rm --name geotoaddb sbejga/rubyapp /bin/bash
+	docker run -it --rm --name geotoaddb -v $PWD:/usr/app sbejga/rubyapp /bin/bash
 	./geotoad.rb
 	
 # TODO:
 
 docker
-
-- link rubyapp to mongo db
-- use correct ip in mongodb.rb to connect to linked mongo db
-- orchestrate? docker composer?
+- make geotoader node.js container with access to "geotoad.rb"
 
 ruby
-- add Gemfile to install required mongo db driver gem?
+- use explicit ruby version in ruby container 
+
+- orchestrate? docker composer?
+- pack mongodb with alpine image? (https://github.com/anapsix/docker-mongodb)

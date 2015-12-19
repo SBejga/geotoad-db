@@ -9,11 +9,22 @@ class Geotoaderdb
   def initialize
   	# increase mongo logger level to FATAL instead of DEBUG
   	Mongo::Logger.logger.level = ::Logger::FATAL
+  	
+=begin
+
+	client = Mongo::Client.new([ '192.168.99.100:27017' ], :user => 'geotoad', :password => 'geotoad', :auth_source => 'admin', :database => 'geotoad')
+	database = client.database
+	database.collections
+	coll = client[:geocache]
+	coll
+	coll.create
+
+=end
   
-  	@client = Mongo::Client.new([ '127.0.0.1:27017' ])
-  	auth = @client.with(database: 'geotoader', user: 'geotoader', password: 'geotoader')
+	#client = Mongo::Client.new([ '192.168.99.100:27017' ], :user => 'geotoad', :password => 'geotoad', :auth_source => 'admin', :database => 'geotoad')
+  	@client = Mongo::Client.new([ 'mongodb:27017' ], :user => 'geotoad', :password => 'geotoad', :auth_source => 'admin', :database => 'geotoad')
   
-    if (auth)
+    if (@client)
       @coll = @client['geocaches']
     else
       #error means fatal, abort geotoad
