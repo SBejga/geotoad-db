@@ -1,0 +1,16 @@
+geotaddb:
+  container_name: geotoaddb
+  build: rubyapp/
+  volumes:
+   - ..:/usr/app
+  links:
+   - mongodb
+  command: bash
+mongodb:
+  container_name: mongodb
+  image: tutum/mongodb:3.0
+  ports: 
+  - 27017:27017
+  - 28017:28017
+  environment:
+  - MONGODB_PASS="mypass"
