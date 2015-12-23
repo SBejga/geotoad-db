@@ -1,5 +1,5 @@
 FROM alpine:3.2
-MAINTAINER John Doe <john@doe.com>
+MAINTAINER Sebastian Bejga <sebastian@bejga.de>
 
 ENV BUILD_PACKAGES bash curl-dev ruby-dev build-base
 ENV RUBY_PACKAGES ruby ruby-io-console ruby-bundler
@@ -12,9 +12,11 @@ RUN apk update && \
     apk add $RUBY_PACKAGES && \
     rm -rf /var/cache/apk/*
 
-RUN mkdir /usr/app && \
+RUN mkdir /usr/rubyapp && \
 	gem install mongo
 
-VOLUME /usr/app
-WORKDIR /usr/app
+ENV PATH /usr/rubyapp/:$PATH
+
+VOLUME /usr/rubyapp
+WORKDIR /usr/rubyapp
 
