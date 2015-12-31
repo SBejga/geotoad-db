@@ -22,7 +22,12 @@ class Geotoaderdb
 =end
   
 	#client = Mongo::Client.new([ '192.168.99.100:27017' ], :user => 'geotoad', :password => 'geotoad', :auth_source => 'admin', :database => 'geotoad')
-  	@client = Mongo::Client.new([ 'mongodb:27017' ], :user => 'geotoad', :password => 'geotoad', :auth_source => 'admin', :database => 'geotoad')
+	
+	mongo_user = ENV['GEOTOAD_MONGOUSER']
+	mongo_pass = ENV['GEOTOAD_MONGOPASS']
+	mongo_db   = ENV['GEOTOAD_MONGODB']
+
+  	@client = Mongo::Client.new([ 'mongodb:27017' ], :user => mongo_user, :password => mongo_pass, :auth_source => 'admin', :database => mongo_db)
   
     if (@client)
       @coll = @client['geocaches']
