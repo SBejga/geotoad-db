@@ -41,6 +41,9 @@ require 'mongodb'
 
 class GeoToad
 
+  #geotoaddb: mongo test
+  geotoadertest = Geotoaderdb.new()
+
   include Common
   include Messages
   include Auth
@@ -687,7 +690,7 @@ class GeoToad
     @detail.preserve = @preserveCache
     token = 0
 
-    # mongo: create mongo connection
+    # geotoaddb: mongo
     geotoader = Geotoaderdb.new()
 
     wpFiltered.each_key{ |wid|
