@@ -40,8 +40,17 @@ class Geotoaderdb
 	mongo_db   = ENV['GEOTOAD_MONGODB']
     mongo_auth = ENV['GEOTOAD_MONGOAUTH']
 
-    if (!mongo_host || !mongo_port || !mongo_db || !mongo_auth)
-        displayError 'Start failed, no mongo environment variables'
+    if (!mongo_host)
+        displayError 'Start failed, no mongo environment variable GEOTOAD_MONGOHOST'
+    end
+    if (!mongo_port)
+        displayError 'Start failed, no mongo environment variable GEOTOAD_MONGOPORT'
+    end
+    if (!mongo_db)
+        displayError 'Start failed, no mongo environment variable GEOTOAD_MONGOUSER'
+    end
+    if (!mongo_auth)
+        displayError 'Start failed, no mongo environment variable GEOTOAD_MONGOAUTH'
     end
 
     puts "(MMM)"
