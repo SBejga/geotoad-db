@@ -12,33 +12,15 @@ class Geotoaderdb
   def initialize
   	# increase mongo logger level to FATAL instead of DEBUG
   	Mongo::Logger.logger.level = ::Logger::FATAL
-  	
-=begin
-
-	client = Mongo::Client.new([ '192.168.99.100:27017' ], :user => 'geotoad', :password => 'geotoad', :auth_source => 'admin', :database => 'geotoad')
-	database = client.database
-	database.collections
-	coll = client[:geocache]
-	coll
-	coll.create
-
-	export GEOTOAD_MONGOHOST=localhost
-	export GEOTOAD_MONGOPORT=27017
-	export GEOTOAD_MONGOUSER=admin
-	export GEOTOAD_MONGOPASS=mypass
-	export GEOTOAD_MONGODB=geotoad
-    export GEOTOAD_MONGOAUTH=admin
-
-=end
   
-	#client = Mongo::Client.new([ '192.168.99.100:27017' ], :user => 'geotoad', :password => 'geotoad', :auth_source => 'admin', :database => 'geotoad')
-
+	# using environment variables to connect to mongodb
+	# see export.sample.sh
 	mongo_host = ENV['GEOTOAD_MONGOHOST']
-	mongo_port = ENV['GEOTOAD_MONGOPORT']
+	mongo_port = ENV['GEOTOAD_MONGOPORT'] || "27017"
 	mongo_user = ENV['GEOTOAD_MONGOUSER']
 	mongo_pass = ENV['GEOTOAD_MONGOPASS']
 	mongo_db   = ENV['GEOTOAD_MONGODB']
-    mongo_auth = ENV['GEOTOAD_MONGOAUTH']
+    mongo_auth = ENV['GEOTOAD_MONGOAUTH'] || "admin"
 
     if (!mongo_host)
         displayError 'Start failed, no mongo environment variable GEOTOAD_MONGOHOST'
