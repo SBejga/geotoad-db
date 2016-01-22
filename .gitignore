@@ -14,6 +14,9 @@ DB_GEOTOAD/
 # created gpx files
 *.gpx
 
+# own export env helper
+export.sh
+
 # intellij/rubymine
 .idea/*
 .idea/misc.xml

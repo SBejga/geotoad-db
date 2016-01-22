@@ -14,7 +14,7 @@ class Geotoaderdb
   	Mongo::Logger.logger.level = ::Logger::FATAL
   
 	# using environment variables to connect to mongodb
-	# see export.sample.sh
+	# see export.example.sh
 	mongo_host = ENV['GEOTOAD_MONGOHOST']
 	mongo_port = ENV['GEOTOAD_MONGOPORT'] || "27017"
 	mongo_user = ENV['GEOTOAD_MONGOUSER']
