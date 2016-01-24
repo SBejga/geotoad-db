@@ -39,10 +39,10 @@ class Geotoaderdb
 
   	if (mongo_user && mongo_pass)
   	    puts "(MMM) mongodb://#{mongo_user}:#{mongo_pass}@#{mongo_host}:#{mongo_port}/#{mongo_db}?authSource=#{mongo_auth}"
-  	    @client = Mongo::Client.new([ 'localhost:27017' ], :user => mongo_user, :password => mongo_pass, :auth_source => mongo_auth, :database => mongo_db)
+  	    @client = Mongo::Client.new([ "#{mongo_host}:#{mongo_port}" ], :user => mongo_user, :password => mongo_pass, :auth_source => mongo_auth, :database => mongo_db)
   	else
   	    puts "(MMM) mongodb://#{mongo_host}:#{mongo_port}/#{mongo_db}"
-  	    @client = Mongo::Client.new([ 'localhost:27017' ], :database => mongo_db)
+  	    @client = Mongo::Client.new([ "#{mongo_host}:#{mongo_port}" ], :database => mongo_db)
   	end
   
     if (@client)
