@@ -1,3 +1,16 @@
+Downstream Merge:
+
+update from base steve8x8 repo:
+
+	# base: steve8x8, origin: fork SBejga
+
+	git checkout master
+	git pull base master
+	git push origin master
+	git checkout mongo
+	git merge master
+	git push origin mongo
+
 Dependencies:
 
 	$ sudo gem install mongo
