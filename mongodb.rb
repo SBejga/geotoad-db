@@ -79,53 +79,46 @@ class Geotoaderdb
     count = @coll.find(:wid => wid).count
     if (count > 1)
     	displayError 'Find more than one item with GC Code ' + wid
-    	
-    elsif (count == 1)
-    
-      documents = @coll.find(:wid => wid)
-	  documents.each do |doc|
-			      
-		  ##check if was userquery -> we know this one is found by someone
-		  if (!userquery.empty?)
-			  foundbyuserarray = doc['foundbyuser']
-	  
-			  ##check if foundbyuser is array
-			  if foundbyuserarray.kind_of?(Array)
-				#check if user already mentioned in foundbyuser and add or set user has found
-				if (foundbyuserarray.include? userquery)
-				else
-				  foundbyuserarray.push(userquery)
-				end
-			  else
-				foundbyuserarray = [userquery]
-			  end
 
-			  gc['foundbyuserarray'] = foundbyuserarray
-		  end
-	  
-		  result = @coll.update_one({ "wid" => wid}, gc)
-		  displayEvent "updated GC in mongodb: #{wid}"
+    # gc exists, update
+    elsif (count == 1)
+      documents = @coll.find(:wid => wid)
+	    documents.each do |doc|
+			      
+        ##check if was userquery -> we know this one is found by someone
+        if (!userquery.empty?)
+          foundbyuserarray = doc['foundbyuser']
+
+          ##check if doc has already foundbyuser array
+          if foundbyuserarray.kind_of?(Array)
+            #check if user already mentioned in foundbyuser and add or set user has found
+            if (foundbyuserarray.include? userquery)
+            else
+              foundbyuserarray.push(userquery)
+            end
+          else
+            foundbyuserarray = [userquery]
+          end
+
+          gc['foundbyuser'] = foundbyuserarray
+        else
+          ## was not userquery
+          ## but not override existing userquery in document
+          gc['foundbyuser'] = doc['foundbyuser']
+        end
+
+        result = @coll.update_one({ "wid" => wid}, gc)
+        displayEvent "updated GC in mongodb: #{wid}"
 		  
       end
 
+    # gc not exists, insert it
     else
       #when inserting, just add userquery
       gc['foundbyuser'] = [userquery]
       
       #insert
       result = @coll.insert_one(gc)
-      
-=begin
-      /*
-      #get inserted id
-      insid = ""
-      @coll.find(:wid => wid).each do |inserted|		
-		insid = inserted[:_id]
-	  end
-	  
-      displayEvent "saved GC to mongodb: #{wid} with #{insid}"
-      */
-=end
       
       displayEvent "saved GC to mongodb: #{wid}"
     end
