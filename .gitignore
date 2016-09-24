@@ -4,6 +4,8 @@
 /tools/build/geotoad_*
 /tools/build/md5sums.*
 /tools/build/Packages.*
+*-v
+.idea/
 
 # Mac
 .DS_Store
@@ -16,7 +18,3 @@ DB_GEOTOAD/
 
 # own export env helper
 export.sh
-
-# intellij/rubymine
-.idea/*
-.idea/misc.xml
