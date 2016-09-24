@@ -16,22 +16,36 @@ Add Alias to your bash_profile
     alias geotoad='~/Development/ruby/geotoad/geotoad.rb'
     alias geotoaddb='~/Development/ruby/geotoaddb/geotoad.rb'
 
-## Update from base repo
+## Updating
 
-update from base steve8x8 repo:
+when updating from base repository (steve8x8/geotoad) then, 
+do it in ~/Development/ruby/geotoad
 
-	# base: steve8x8, origin: fork SBejga
-	# https://github.com/steve8x8/geotoad
-	# https://github.com/SBejga/geotoaddb
+    cd ~/Development/ruby/geotoad
 
-	git checkout master
+    git checkout master
 	git pull base master
-	git push origin master
+	
+Do the merge
+	
+update the VERSION file, to prevent update messages when starting geotoad
+    
+    	replace version in 'lib/version.rb' with version from ./VERSION
 
-after checkout update the VERSION file, to prevent update messages when starting geotoad
+And push changes to to my fork repo at master branch
 
-	replace version in 'lib/version.rb' with version from ./VERSION
+    git push origin master
+    
+Do the rest at mongo branch at ~/Development/ruby/geotoaddb
 
-to switch to mongo branch
-
+    cd ~/Development/ruby/geotoaddb
+    
+    git checkout master
+    git pull
     git checkout mongo
+    git merge master
+
+Do the merge
+
+    git push
+   
