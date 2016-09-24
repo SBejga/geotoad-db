@@ -304,6 +304,9 @@ class GeoToad
     displayInfo "Clearing cache details older than 3 days"
     findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "seek"), 3, "^cache_details\\.aspx.*", true)
 
+    displayInfo "Clearing log submission pages older than 3 days"
+    findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "seek"), 3, "^log\\.aspx.*", true)
+
     displayInfo "Clearing lat/lon query data older than 3 days"
     findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "seek"), 3, "^nearest\\.aspx.*_lat_.*_lng_.*", true)
 
@@ -330,15 +333,24 @@ class GeoToad
     displayMessage "Logging in as #{@option['user']}"
     @cookie = login(@option['user'], @option['password'])
     debug "Login returned cookie #{hideCookie(@cookie).inspect}"
-    if (@cookie)
+    if (@cookie) && (@cookie =~ /gspkauth=/) && (@cookie =~ /(ASP.NET_SessionId=\w+)/)
       displayMessage "Login successful"
     else
-      displayWarning "Login failed! Check network connection, username and password!"
-      displayWarning "Note: Subsequent operations may fail. You've been warned."
+      displayWarning "Login failed!"
+      displayWarning "Check network connection, username and password!"
+      #displayWarning "Note: Subsequent operations may fail. You've been warned."
+      #displayInfo    "You have 60 seconds to safely interrupt here."
+      #sleep 60
+      #displayWarning "Okay, as you wish. Don't complain if something breaks!"
+      displayError   "Stopping here, for your own safety."
     end
     displayMessage "Querying user preferences"
     @dateFormat, prefLang, $my_lat, $my_lon, $my_src = getPreferences()
-    displayInfo "Using date format #{@dateFormat}, language #{prefLang}"
+    displayInfo "Using date format \"#{@dateFormat}\", language \"#{prefLang}\""
+    if prefLang.to_s.empty?
+      displayWarning "Could not get language setting from preferences."
+      displayWarning "This may be due to a failed login."
+    end
     displayInfo "Using home location (#{$my_lat || 'nil'}, #{$my_lon || 'nil'}) from #{$my_src}"
 
     if @option['myLogs'] || @option['myTrackables']
@@ -375,7 +387,13 @@ class GeoToad
     displayBar
     #puts ""
     @queryArg.to_s.split($delimiters).each{ |queryArg0|
+      # strip whitespace at beginning and end
       queryArg = queryArg0.gsub(/^\s+/, '').gsub(/\s+$/, '')
+      # skip if nothing left
+      if queryArg.empty?
+        displayWarning "\"#{@queryType}\" search argument \"#{queryArg0}\" empty, skipping."
+        next
+      end
       message = "\"#{@queryType}\" search for \"#{queryArg}\""
       search = SearchCache.new
 
@@ -542,6 +560,21 @@ class GeoToad
     end
     excludedFilterTotal = beforeFilterTotal - @filtered.totalWaypoints
     showRemoved(excludedFilterTotal, "Cache type")
+
+    # caches with warnings we choose not to include.
+    beforeFilterTotal = @filtered.totalWaypoints
+    if not @option['includeArchived']
+      @filtered.removeByElement('archived')
+    end
+    excludedFilterTotal = beforeFilterTotal - @filtered.totalWaypoints
+    showRemoved(excludedFilterTotal, "Archived")
+    #
+    beforeFilterTotal = @filtered.totalWaypoints
+    if not @option['includeDisabled']
+      @filtered.removeByElement('disabled')
+    end
+    excludedFilterTotal = beforeFilterTotal - @filtered.totalWaypoints
+    showRemoved(excludedFilterTotal, "Disabled")
 
     # exclude Premium Member Only caches on request
     beforeFilterTotal = @filtered.totalWaypoints
@@ -774,6 +807,17 @@ class GeoToad
     @filtered= Filter.new(@detail.waypoints)
 
     # caches with warnings we choose not to include.
+    beforeFilterTotal = @filtered.totalWaypoints
+    if @option['includeArchived']
+      @appliedFilters['--includeArchived'] = { 'f' => "", 't' => "also archived" }
+    else
+      # this would cause too much noise, don't advertise
+      #@appliedFilters['--excludeArchived'] = { 'f' => "", 't' => "not archived" }
+      @filtered.removeByElement('archived')
+    end
+    excludedFilterTotal = beforeFilterTotal - @filtered.totalWaypoints
+    showRemoved(excludedFilterTotal, "Archived")
+    #
     beforeFilterTotal = @filtered.totalWaypoints
     if @option['includeDisabled']
       @appliedFilters['-z'] = { 'f' => "", 't' => "also disabled" }

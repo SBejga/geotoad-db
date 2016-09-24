@@ -563,11 +563,15 @@ class Output
         value = @wpHash[wid][var].to_s
       elsif (type == "out")
         value = @outVars[var].to_s
-      # convert to XML
+      # convert to XML, with some special (online-able) effects for c:geo
       elsif (type == "wpEntity" or type == "wpXML")
         value = makeXML(@wpHash[wid][var].to_s)
+      elsif (type == "wpEntityCgeo" or type == "wpCGEO")
+        value = makeXML(@wpHash[wid][var].to_s, removeImages=false, removeLinks=false)
       elsif (type == "outEntity" or type == "outXML")
         value = makeXML(@outVars[var].to_s)
+      elsif (type == "outEntityCgeo" or type == "outCGEO")
+        value = makeXML(@outVars[var].to_s, removeImages=false, removeLinks=false)
       # convert to text
       elsif (type == "wpText")
         value = makeText(@wpHash[wid][var].to_s)
@@ -622,20 +626,30 @@ class Output
     return text
   end
 
-  def makeXML(str)
+  def makeXML(str, removeImages=true, removeLinks=true)
     if not str or str.length == 0
         return ""
     end
     # issue 262: "emoji" seem to break GPSr devices
     text = deemoji(str, false)
 
-    # remove images, links
-    #text.gsub!(/(<img\s.*?src=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>)/im){"[img #{$2}]#{$1}"}
-    text.gsub!(/<img\s.*?src=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>/im){"[* #{$1}]"}
-    #text.gsub!(/(<a\s.*?href=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>)/im){"[link #{$2}]#{$1}"}
-    text.gsub!(/<a\s.*?href=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>/im){"[= #{$1}]"}
-    #text.gsub!(/(<\/a.*?>)/im){"#{$1}[/link]"}
-    text.gsub!(/<\/a.*?>/im){"[=]"}
+    # remove/tweak links, images
+    if removeLinks
+      # text-only link representation
+      text.gsub!(/<a\s.*?href=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>(.*?)<\/a.*?>/im){"[= #{$1} #{$2} =]"}
+    else
+      # clickable link
+      text.gsub!(/(<a\s.*?href=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>)(.*?)(<\/a.*?>)/im){"#{$1}[= #{$2} =] #{$3} #{$4}"}
+    end
+    # remove smileys
+    text = icons2Text(text.dup)
+    if removeImages
+      # text-only image representation
+      text.gsub!(/<img\s.*?src=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>/im){"[* #{$1} *]"}
+    else
+      # replace image reference by clickable link to avoid bandwidth consumption
+      text.gsub!(/<img\s.*?src=\s*[\'\"](https?:\/\/(.*?)[\'\"].*?)>/im){"<a href=\"#{$1}\">[* #{$2} *]</a>"}
+    end
 
     # fonts are not represented properly on most devices
     # avoid huge sizes, dark on black, white on white
@@ -643,6 +657,7 @@ class Output
     # also for style=...
     text.gsub!(/([;\'\"])\s*(background-)?color:[^;]*;/){$1}
     text.gsub!(/font-size:\d+p/, 'font-size:12p') # can be pt or px...
+    #text.gsub!(/font-size:\d+p[tx]/, 'font-size:12pt') # can be pt or px...
 
     # escape HTML entities (including <>)
     begin
@@ -717,9 +732,9 @@ class Output
     text.gsub!(/<\/?tr>/i, "\n")
     text.gsub!(/<\/?br(\s*\/)?>/i, "\n") #
     text.gsub!(/<li>/i, "\n * (o) ")
-    text.gsub!(/<img\s.*?src=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>/im){"[* #{$1}]"}
-    text.gsub!(/<a\s.*?href=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>/im){"[= #{$1}]"}
-    text.gsub!(/<\/a.*?>/im, '[=]')
+    text.gsub!(/<img\s.*?src=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>/im){"[* #{$1} *]"}
+    text.gsub!(/<a\s.*?href=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>/im){"[= #{$1} "}
+    text.gsub!(/<\/a.*?>/im, ' =]')
     text.gsub!(/<table.*?>/im, "\n[table]\n")
     text.gsub!(/<\/table.*?>/im, "\n[/table]\n")
     text.gsub!(/<.*?>/m, '')
@@ -773,7 +788,7 @@ class Output
       "_wink" => '[;)]',
     }
     # translate smileys, remove other HTML img tags
-    return str.gsub(/<img.*?icon_smile(.*?)\.gif[^>]*>/i){ iconmap[$1.downcase].to_s }.gsub(/<(\/?img)[^>]*>/i){ "[#{$1.upcase}]" }
+    return str.gsub(/<img.*?icon_smile(.*?)\.gif[^>]*>/im){iconmap[$1.downcase].to_s} #.gsub(/<\/img[^>]*>/im){""}
   end
 
   def generatePreOutput(title)
@@ -981,23 +996,6 @@ class Output
       return decrypted
     else
       return ''
-    end
-  end
-
-  # convert cache "waypoint ID" (GC.....) to numeric value
-  def cacheID(wid)
-    if wid
-      wp = wid.gsub(/^GC/, '')
-      if wp.length <= 4 && wp < 'G000'
-        # base 16 is easy
-        return wp.to_i(16)
-      else
-        # base 31: consider gaps in char set, and correction offset
-        # magic number -411120 reflects that GCG000 = GCFFFF + 1
-        return wp.upcase.tr('0-9A-HJKMNPQRTV-Z', '0-9A-U').to_i(31) - 411120
-      end
-    else
-      return 0
     end
   end
 
@@ -1233,7 +1231,7 @@ class Output
         # remove locationless wpts
         xmlWptsGsak = xmlWptsCgeo.gsub(/<wpt( lat="0.000000*" lon="0.000000*")?>.*?<\/wpt>\s*/m, '')
         # strip desc strings
-        xmlWptsCgeo.gsub!(/<desc>(.*?):.*?<\/desc>/){ "<desc>#{$1}</desc>" }
+        xmlWptsCgeo.gsub!(/<desc>(.*?):.*?<\/desc>/){"<desc>#{$1}</desc>"}
       end
       if xmlWptsGsak
         # remove gsak additions
@@ -1267,22 +1265,21 @@ class Output
     txtTrackables = ''
     if cache['travelbug'].to_s.length > 0
       cache['travelbug'].split(', ').each{ |tbname|
-        # we don't have the real trackable ref or id
-        # therefore create a random number for the trackable
-        # use a number range far above what exists now
-        tbid = 801205108 + rand(923520) # = X0abcd
-        # convert into string
-        tbref = 'TB' + (tbid + 411120).to_s(31).upcase.tr('0-9A-U', '0-9A-HJKMNPQRTV-Z')
-        debug2 "Trackables: use fake id #{tbid} = #{tbref} for #{tbname}"
+        # 20160830: no longer fake TB ID or ref
         xmlTrackables << "\n"
-#        xmlTrackables << "    <groundspeak:travelbug id=\"#{tbid}\" ref=\"#{tbref}\">\n"
         xmlTrackables << "    <groundspeak:travelbug ref=\"\">\n"
         xmlTrackables << "      <groundspeak:name>" + makeXML(tbname) + "</groundspeak:name>\n"
         xmlTrackables << "    </groundspeak:travelbug>\n"
+        # separator between TBs
+        if txtTrackables.length > 0
+          txtTrackables << "; "
+        end
         txtTrackables << makeText(tbname)
       }
     end
     if xmlTrackables.length > 0
+      # get XML indentation right
+      xmlTrackables << "  "
       debug3 "Generated trackables XML: #{xmlTrackables}"
     end
     if txtTrackables.length > 0

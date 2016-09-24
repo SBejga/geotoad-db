@@ -80,23 +80,6 @@ class CacheDetails
   end
 
   def getRemoteMapping1(wid)
-    debug "Get GUID from GCCodeLookup for #{wid}"
-    # get mapping using GC code lookup (found via wireshark)
-    @pageURL = 'http://www.geocaching.com/seek/cache_details.aspx/GCCodeLookup'
-    page = ShadowFetch.new(@pageURL)
-    # no need to set expiry as this bypasses the file cache
-    response = page.fetchGuid(wid)
-    # returns json object {"d":"http://...guid=..."}
-    if response =~ /guid=([\w-]*)/
-      guid = $1
-      debug2 "Found GUID: #{guid}"
-      return guid
-    end
-    displayWarning "Could not map(1) #{wid} to GUID"
-    return nil
-  end
-
-  def getRemoteMapping2(wid)
     debug "Get GUID from cache_details for #{wid}"
     # extract mapping from cache_details page
     guid = nil
@@ -109,7 +92,28 @@ class CacheDetails
       debug2 "Found GUID: #{guid}"
       return guid
     end
-    displayWarning "Could not map(2) #{wid} to GUID"
+    debug "Could not map(1) #{wid} to GUID"
+    return nil
+  end
+
+  def getRemoteMapping2(wid)
+    debug "Get GUID from log submission page for #{wid}"
+    # log submission page contains guid of cache [2016-04-30]
+    logid = cacheID(wid)
+    guid = nil
+    @pageURL = 'https://www.geocaching.com/seek/log.aspx?ID=' + logid.to_s + '&lcn=1'
+    page = ShadowFetch.new(@pageURL)
+    page.localExpiry = 1 * 24 * 3600	# make this short to overcome locks
+    data = page.fetch
+    if data =~ /The listing has been locked/m
+      displayWarning "#{wid} logbook is locked, cannot map"
+    end
+    if data =~ /cache_details\.aspx\?guid=([\w-]+)/m
+      guid = $1
+      debug2 "Found GUID: #{guid}"
+      return guid
+    end
+    debug "Could not map(2) #{wid} to GUID"
     return nil
   end
 
@@ -127,6 +131,7 @@ class CacheDetails
         end
         if not guid
           # no way
+          displayWarning "Could not map #{id.inspect} to GUID"
           return nil
         end
         debug2 "mapped #{id.inspect} to #{guid.inspect}"
@@ -548,6 +553,26 @@ class CacheDetails
       if line =~ /^\s*<h\d>Cache is Unpublished<\/h\d>\s*$/i
         return "unpublished"
       end
+
+      # last resort to get coordinates - from JavaScript line (at end)
+      if line =~ /^var lat=(-?[0-9\.]+), lng=(-?[0-9\.]+),/
+        jslat = $1
+        jslon = $2
+        debug "got javascript lat/lon #{jslat}/#{jslon}"
+        if not cache['membersonly'] and ( not cache['latdata'] or not cache['londata'] )
+          cache['latdata'] = jslat
+          cache['londata'] = jslon
+          # "written" style, whatever that's good for.
+          cache['latwritten'] = lat2str(jslat, degsign="°")
+          cache['lonwritten'] = lon2str(jslon, degsign="°")
+          debug "last resort lat/lon for #{wid}"
+        end
+      end
+      # 2013-02-05: additional info in "var lat=..." line, but ignore []
+      # ;cmapAdditionalWaypoints = [{"lat":54.1835,"lng":12.87963,"type":218,"name":"GC3QN0F Stage 2 ( Question to Answer )","pf":"S2"},{...}];
+      if (line =~ /;cmapAdditionalWaypoints\s*=\s*\[(.+)\];/)
+        cache['additional_raw2'] = parseMapWaypoints($1)
+      end
     }
     rescue => error
       displayWarning "Error in parseCache():data.split"
@@ -772,8 +797,14 @@ class CacheDetails
       cache['last_find_type'] = 'none'
     end
 
-    comment_text = comments.collect{ |x| x['text'] }
+    #unused#comment_text = comments.collect{ |x| x['text'] }
     cache['additional_raw'] = parseAdditionalWaypoints(data)
+
+    # Add "map" waypoints (PMO)
+    if not cache['additional_raw'] and cache['additional_raw2']
+      debug "Insert waypoints from MAP"
+      cache['additional_raw'] = cache['additional_raw2']
+    end
 
     # Fix cache owner/name
     if cache['name2'] and cache['creator2']
@@ -823,6 +854,60 @@ class CacheDetails
     end
   end
 
+  def parseMapWaypoints(cmaptext)
+    cmaphash = Hash.new()
+    cmaptext.split(/},{/).each{ |wp|
+      itemhash = Hash.new()
+      begin
+        # strip curly brackets, be careful when splitting items at commas and colons:
+        # {"lat":52.13368,"lng":12.56848,"type":218,"name":"Huhu, wer schaut aus dem Haus raus? ( Question to Answer )","pf":"S6"}
+        # were not 100% safe, better have a dummy error handler
+        wp.gsub(/^{/, '').gsub(/}$/, '').split(/,\"/).each{ |item|
+          keyval = item.split(/\":/)
+          itemhash[keyval[0].gsub(/\"/, '')] = keyval[1].gsub(/\"/, '')
+        }
+        if itemhash['pf']
+          cmaphash[itemhash['pf']] = itemhash
+        end
+      rescue # ignore errors
+      end
+    }
+    debug2 "MAP WP all: #{cmaphash.inspect}"
+    if cmaphash.empty?
+      return nil
+    end
+    # create table similar to Additional Waypoints and return that
+    table = ''
+    table << "<table id=\"Waypoints\">\n"
+    table << "  <tbody>\n"
+    cmaphash.each_key{ |pf|
+      cmapitem = cmaphash[pf]
+      # convert floats to "X xx&deg; xx.xxx"
+      slat = lat2str(cmapitem['lat'], degsign="&#176;")
+      slon = lon2str(cmapitem['lng'], degsign="&#176;")
+      # strip blanks off wpt type in parentheses
+      name = cmapitem['name'].gsub(/\(\s*(.*?)\s*\)/){"(#{$1})"}
+      table << "    <tr ishidden=\"false\">\n"
+      table << "      <td></td>\n" #empty
+      table << "      <td></td>\n" #empty
+      table << "      <td></td>\n" #empty
+      table << "      <td>#{pf}</td>\n" #prefix
+      table << "      <td>#{pf}</td>\n" #no separate lookup code
+      table << "      <td>#{name}</td>\n"
+      table << "      <td>#{slat} #{slon}</td>\n"
+      table << "      <td></td>\n" #empty
+      table << "    </tr>\n"
+      table << "    <tr>\n"
+      table << "      <td></td>\n"
+      table << "      <td>Note:</td>\n"
+      table << "      <td></td>\n"
+      table << "    </tr>\n"
+    }
+    table << "  </tbody>\n"
+    table << "</table>"
+    return table
+  end
+
   def parseComments(data, creator)
     comments = []
     visitors = []
@@ -868,7 +953,8 @@ class CacheDetails
 
   def removeSpam(text)
     # <a href="http://s06.flagcounter.com/more/NOk"><img src= "http://s06.flagcounter.com/count/NOk/bg=E2FFC4/txt=000000/border=CCCCCC/columns=4/maxflags=32/viewers=0/labels=1/pageviews=1/" alt="free counters" /></a>
-    removed = text.gsub(/<a href[^>]*><img src[^>]*((flag|gc)counter|andyhoppe\.com\/count|gcstat\.selfip|gcvote)[^>]*><\/a>/m, '')
+    removed = text.dup
+    removed.gsub!(/<a href[^>]*><img src[^>]*((flag|gc)counter|andyhoppe\.com|gcwetterau\.de|gcstat\.selfip|gcvote)[^>]*><\/a>/m, '')
     removed.gsub!(/<a href=[^>]*hitwebcounter.com[^>]*>.*?<\/a[^>]*>/m, '')
     removed.gsub!(/<!--[^>]*hitwebcounter[^>]*-->/m, '')
     if removed != text

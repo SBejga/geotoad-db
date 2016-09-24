@@ -2,14 +2,15 @@
 GeoToad %VERSION% by Thomas Stromberg and The GeoToad Project (c) 2002 - 2016
 ==========================================================================
 
+
+------------------
 Table of Contents:
 ------------------
-* About GeoToad
-* System Requirements
-* Getting Started
-* Command-Line Syntax
-* Command-Line Examples
-
+ - About GeoToad
+ - System Requirements
+ - Getting Started
+ - Command-Line Syntax
+ - Command-Line Examples
 
 -------------
 About GeoToad

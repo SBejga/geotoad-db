@@ -12,9 +12,10 @@ module Common
   # logs.aspx s=1: geocaches (default); s=2: trackables; s=3: benchmarks
   @@mylogs_url = 'https://www.geocaching.com/my/logs.aspx?s=1'
   @@mytrks_url = 'https://www.geocaching.com/my/logs.aspx?s=2'
-  @@dateFormat = 'dd MMM yy'
+  @@dateFormat = 'dd MMM yy' # this should be a never-used one
 
   def getPreferences()
+    debug2 "getting preferences"
     page = ShadowFetch.new(@@prefs_url)
     page.localExpiry = 3 * 3600		# 3 hours
     data = page.fetch
@@ -53,6 +54,10 @@ module Common
     end
     if ! dateFormat.to_s.empty?
       @@dateFormat = dateFormat
+      debug2 "no date format set in preferences - this should never happen"
+    end
+    if ! prefLanguage.to_s.empty?
+      debug2 "no language set in preferences - this should never happen"
     end
     # get center location for distance
     my_lat = nil
@@ -174,6 +179,7 @@ module Common
 # O	yyyy.MM.dd.
 # P	yyyy/MM/dd
 # Q	yyyy-MM-dd
+# + later additions (mostly yy two-digit years)
 #  resulting in combined patterns:
 # ABFJK		d+[.-]m+[.-]y+
 # CDH		d+/m+/y+ (see LM!)
@@ -200,16 +206,16 @@ module Common
     when /(\d)+ .+\*$/
       debug2 "date: #{$1} days ago"
       days_ago=$1.to_i
-    # [ABFJK] dd.MM.yyyy, d-M-yyyy etc. (dots and dashes)
-    when /^(\d+)[\.-](\d+)[\.-](\d{4})$/
-      year = $3
+    # [ABFJK] dd.MM.yyyy, d-M-yyyy etc. (dots and dashes), + yy variant (20160501)
+    when /^(\d{1,2})[\.-](\d{1,2})[\.-](\d{2}(\d{2})?)$/
+      year = (2000 + ($3.to_i % 100)).to_s
       month = $2
       day = $1
       debug2 "dotted date: year=#{year} month=#{month} day=#{day}"
       timestamp = Time.local(year, month, day)
     # [CDH] dd/MM/yyyy, [LM] MM/dd/yyyy (need to distinguish!)
-    when /^(\d+)\/(\d+)\/(\d{4})$/
-      year = $3
+    when /^(\d{1,2})\/(\d{1,2})\/(\d{2}(\d{2})?)$/
+      year = (2000 + ($3.to_i % 100)).to_s
       value1 = $1
       value2 = $2
       # interpretation depends on dateFormat
@@ -231,18 +237,18 @@ module Common
       end
     # [EGI] dd/MMM/yyyy, dd.MMM.yyyy (20140826), dd MMM yy
     # ToDo: i18n month names?
-    when /^(\d+[ \/\.]\w{3}[ \/\.]\d{2}(\d{2})?)/
+    when /^(\d{1,2}[ \/\.]\w{3}[ \/\.]\d{2}(\d{2})?)/
       debug2 "dd_MMM_yy[yy] date: #{$1}"
       timestamp = Time.parse(date)
     # [N] MMM/dd/yyyy
-    when /^(\w{3})\/(\d+)\/(\d+)/
+    when /^(\w{3})\/(\d{1,2})\/(\d{2,4})/
       year = $3
       month = $1
       day = $2
       debug2 "MMM/dd/yyyy date: year=#{year} month=#{month} day=#{day}"
       timestamp = Time.parse("#{day} #{month} #{year}")
     # [OPQ] yyyy-MM-dd, yyyy/MM/dd etc. (ISO style)
-    when /^(\d{4})[\/\.-](\d+)[\/\.-](\d+)(\.)?$/
+    when /^(\d{4})[\/\.-](\d{1,2})[\/\.-](\d{1,2})(\.)?$/
       year = $1
       month = $2
       day = $3
@@ -252,7 +258,7 @@ module Common
       debug2 "no date: N/A"
       return nil
     else
-      displayWarning "Could not parse date: #{date} - unknown language?"
+      displayWarning "Could not parse date: #{date} - unsupported format?"
       return nil
     end
    rescue => error
@@ -483,6 +489,23 @@ module Common
       value = 0
     end
     return value
+  end
+
+  # convert cache "waypoint ID" (GC.....) to numeric value
+  def cacheID(wid)
+    if wid
+      wp = wid.gsub(/^GC/, '')
+      if wp.length <= 4 && wp < 'G000'
+        # base 16 is easy
+        return wp.to_i(16)
+      else
+        # base 31: consider gaps in char set, and correction offset
+        # magic number -411120 reflects that GCG000 = GCFFFF + 1
+        return wp.upcase.tr('0-9A-HJKMNPQRTV-Z', '0-9A-U').to_i(31) - 411120
+      end
+    else
+      return 0
+    end
   end
 
   # mapping WID to GUID via dictionary file
