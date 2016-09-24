@@ -29,7 +29,7 @@ class Geotoaderdb
         displayError 'Start failed, no mongo environment variable GEOTOAD_MONGOPORT'
     end
     if (!mongo_db)
-        displayError 'Start failed, no mongo environment variable GEOTOAD_MONGOUSER'
+        displayError 'Start failed, no mongo environment variable GEOTOAD_MONGODB'
     end
     if (!mongo_auth)
         displayError 'Start failed, no mongo environment variable GEOTOAD_MONGOAUTH'
