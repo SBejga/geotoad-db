@@ -31,3 +31,7 @@ update from base steve8x8 repo:
 after checkout update the VERSION file, to prevent update messages when starting geotoad
 
 	replace version in 'lib/version.rb' with version from ./VERSION
+
+to switch to mongo branch
+
+    git checkout mongo
