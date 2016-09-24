@@ -17,13 +17,20 @@ running mongo
 need MONGO environment variables.
 See export.example.sh
 
-GUI
+    export GEOTOAD_MONGOHOST=localhost
+    export GEOTOAD_MONGODB=geotoad
+
+**GUI**
 	
 	$ ./geotoad.rb
 
-CMD
+**CMD**
+
+use geocaching user credentials stored in .config/GeoToad
 
 	geotoad.rb --format=yourfindgpx --includeDisabled --output=GC16VNF.gpx --queryType=wid GC16VNF
+	
+or add it to the command line via a temporary variable
 
 	GEOCACHING_USER='abc'
 	GEOCACHING_PW='xxx'
