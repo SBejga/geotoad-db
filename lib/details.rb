@@ -565,7 +565,11 @@ class CacheDetails
           # "written" style, whatever that's good for.
           cache['latwritten'] = lat2str(jslat, degsign="°")
           cache['lonwritten'] = lon2str(jslon, degsign="°")
-          debug "last resort lat/lon for #{wid}"
+          if cache['membersonly']
+            debug "rewrite lat/lon for PMO #{wid}"
+          else
+            debug "last resort lat/lon for #{wid}"
+          end
         end
       end
       # 2013-02-05: additional info in "var lat=..." line, but ignore []
@@ -864,7 +868,7 @@ class CacheDetails
         # were not 100% safe, better have a dummy error handler
         wp.gsub(/^{/, '').gsub(/}$/, '').split(/,\"/).each{ |item|
           keyval = item.split(/\":/)
-          itemhash[keyval[0].gsub(/\"/, '')] = keyval[1].gsub(/\"/, '')
+          itemhash[keyval[0].gsub(/\"/, '')] = keyval[1].gsub(/\\\"/, '*').gsub(/\"/, '')
         }
         if itemhash['pf']
           cmaphash[itemhash['pf']] = itemhash
@@ -885,17 +889,33 @@ class CacheDetails
       # convert floats to "X xx&deg; xx.xxx"
       slat = lat2str(cmapitem['lat'], degsign="&#176;")
       slon = lon2str(cmapitem['lng'], degsign="&#176;")
+      type = cmapitem['type']
+      sym = "Unknown #{type}" # do not know better yet
+      case type.to_i
+      when 217
+        sym = "Parking Area"
+      when 218
+        sym = "Virtual Stage"
+      when 219
+        sym = "Physical Stage"
+      when 220
+        sym = "Final Location"
+      when 221
+        sym = "Trailhead"
+      when 452
+        sym = "Reference Point"
+      end
       # strip blanks off wpt type in parentheses
       name = cmapitem['name'].gsub(/\(\s*(.*?)\s*\)/){"(#{$1})"}
       table << "    <tr ishidden=\"false\">\n"
-      table << "      <td></td>\n" #empty
-      table << "      <td></td>\n" #empty
-      table << "      <td></td>\n" #empty
-      table << "      <td>#{pf}</td>\n" #prefix
-      table << "      <td>#{pf}</td>\n" #no separate lookup code
-      table << "      <td>#{name}</td>\n"
-      table << "      <td>#{slat} #{slon}</td>\n"
-      table << "      <td></td>\n" #empty
+      table << "      <td></td>\n"			# col 1: empty
+      table << "      <td></td>\n"			# col 2: (visibility icon) empty
+      table << "      <td></td>\n"			# col 3: (point type icon) empty
+      table << "      <td>#{pf}</td>\n"			# col 4: Prefix
+      table << "      <td>#{pf}</td>\n"			# col 5: (Lookup)
+      table << "      <td>#{name} (#{sym})</td>\n"	# col 6: Name (type)
+      table << "      <td>#{slat} #{slon}</td>\n"	# col 7: Coordinate
+      table << "      <td></td>\n"			# col 8: empty
       table << "    </tr>\n"
       table << "    <tr>\n"
       table << "      <td></td>\n"
