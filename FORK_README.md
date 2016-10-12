@@ -28,15 +28,14 @@ do it in ~/Development/ruby/geotoad
     git checkout master
     git pull base master
 	
-Do the merge
+Do the merge:
 
-update the VERSION file, to prevent update messages when starting geotoad
-    
-    	replace version in 'lib/version.rb' with version from ./VERSION
+- in most cases only check lib/version.rb
+- update line with version
 
 Commit
 
-    git commit
+    git add lib/version.rb && git commit
 
 And push changes to to my fork repo at master branch
 
