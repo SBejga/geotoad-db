@@ -1,9 +1,15 @@
 # -*- encoding : utf-8 -*-
 
+require 'fileutils'
 require 'cgi'
+require 'uri'
+require 'time'
+require 'zlib'
+require 'base64'
+require 'lib/common'
+require 'lib/messages'
 require 'lib/templates'
 require 'lib/version'
-require 'zlib'
 require 'lib/geodist'
 
 GOOGLE_MAPS_URL = 'http://maps.google.com/maps'
@@ -25,20 +31,20 @@ class Output
     'MILES'     => 'mi',
 
     'CACHE'     => 'C',
-    'GEOCACHE'  => 'C',
-    'GEOC'      => 'C',
-    'GEOCACHING' => 'GC',
+    'GEOCACHE'  => 'GC',
+    'GEOC'      => 'GC',
+    'GEOCACHING' => 'GCing',
     'NIGHTCACHE' => 'NC',
     'NIGHTC'    => 'NC',
-    'GEOKRET'   => 'GK',
-    'GEOKRETY'  => 'GK',
+#   'GEOKRET'   => 'GK',
+#   'GEOKRETY'  => 'GK',
 
     'A'         => '',
     'AN'        => '',
     'THE'       => '',
     'AND'       => '+',
     'OR'        => '|',
-    'EITHER'    => 'E',
+#   'EITHER'    => 'E',
     'ON'        => '',
     'OF'        => '',
     'FROM'      => '',
@@ -47,7 +53,7 @@ class Output
     'IS'        => '',
     'IN'        => '',
     'WITH'      => 'W',
-    'THAT'      => 'T',
+#    'THAT'      => 'T',
 
     'PARK'      => 'Pk',
     'LAKE'      => 'Lk',
@@ -63,8 +69,8 @@ class Output
     'RIDGE'     => 'Rdg',
     'FOREST'    => 'Frst',
     'POINT'     => 'Pt',
-    'HOTEL'     => 'Hl',
-    'MOTEL'     => 'Ml',
+    'HOTEL'     => 'H',
+    'MOTEL'     => 'Mo',
     'CHURCH'    => 'Ch',
     'CHAPEL'    => 'Chp',
     'STATION'   => 'St',
@@ -75,10 +81,10 @@ class Output
     'DOUBLE'    => 'Dbl',
     'LITTLE'    => 'Lil',
     'BLACK'     => 'Blk',
-    'BROWN'     => 'Brn',
-    'ORANGE'    => 'Org',
-    'WHITE'     => 'Wht',
-    'GREEN'     => 'Grn',
+#   'BROWN'     => 'Brn',
+#   'ORANGE'    => 'Org',
+#   'WHITE'     => 'Wht',
+#   'GREEN'     => 'Grn',
 
     'ONE'       => '1',
     'TWO'       => '2',
@@ -90,15 +96,16 @@ class Output
     'EIGHT'     => '8',
     'NINE'      => '9',
     'TEN'       => '10',
-    'II'        => '2',
-    'III'       => '3',
-    'IV'        => '4',
-    #'V'         => '5',
-    'VI'        => '6',
-    'VII'       => '7',
-    'VIII'      => '8',
-    'IX'        => '9',
-    #'X'         => '10',
+# 2017: no longer convert Roman numerals
+#   'II'        => '2',
+#   'III'       => '3',
+#   'IV'        => '4',
+#   'V'         => '5',
+#   'VI'        => '6',
+#   'VII'       => '7',
+#   'VIII'      => '8',
+#   'IX'        => '9',
+#   'X'         => '10',
 
     'YEARS'     => 'yr',
     'YEAR'      => 'yr',
@@ -216,13 +223,18 @@ class Output
 
   ## the functions themselves ####################################################
 
+  attr_writer :waypointLength
+  attr_writer :commentLimit
+  attr_writer :conditionWP
+
   def initialize
     @output = Array.new
     @waypointLength = 0
     @username = nil
     # initialize templates
-    Templates.new if $FORMATS.empty?
+    Templates.new if $allFormats.empty?
     @commentLimit = 10
+    @conditionWP = nil
   end
 
   def input(data)
@@ -250,9 +262,8 @@ class Output
     tempname = name.dup
     tempname = makeText(tempname)
     tempname = utf8upcase(tempname[0..0]) + tempname[1..-1].to_s
-    if (tempname.length <= maxlength)
-      return tempname
-    end
+    return tempname if (tempname.length <= maxlength)
+
     tempname.gsub!(/cache/i, 'C')
     tempname.gsub!(/lost[\s-]*place/i, 'LP')
     tempname.gsub!(/bonus/i, 'BO')
@@ -275,7 +286,7 @@ class Output
     newwords = Array.new
     tempname.split(/ /).each{ |word|
       # skip "empty" words
-      next if (word.length < 1)
+      next if word.empty?
       # word.capitalize! would downcase everything else
       word = utf8upcase(word[0..0]) + word[1..-1].to_s
       newwords.push(word)
@@ -347,7 +358,7 @@ class Output
       word = newwords[-index]
       next if (word.length < 8)
       # one by one
-      while (word.length > 1) && (i = word.rindex(/[aeiouäöü]/))
+      while (word.length > 1) and (i = word.rindex(/[aeiouäöü]/))
         word[i] = ''
         newwords[-index] = word
         break if (newwords.join.length <= maxlength)
@@ -362,7 +373,7 @@ class Output
     (1..wordcount).each{ |index|
       word = newwords[-index]
       # one by one
-      while (word.length > 1) && (i = word.rindex(/[aeiouäöü]/))
+      while (word.length > 1) and (i = word.rindex(/[aeiouäöü]/))
         word[i] = ''
         newwords[-index] = word
         break if (newwords.join.length <= maxlength)
@@ -387,7 +398,7 @@ class Output
     snames = {}
     @wpHash.each_key{ |wid|
       cache = @wpHash[wid]
-      if (@waypointLength < 1)
+      if (@waypointLength <= 0)
         cache['sname'] = wid.dup
         next
       end
@@ -427,8 +438,8 @@ class Output
 
   # select the format for the next set of output
   def formatType=(format)
-    if ($FORMATS[format])
-      @outputFormat = $FORMATS[format].dup
+    if $allFormats[format]
+      @outputFormat = $allFormats[format].dup
       @outputType = format
       debug "format switched to #{format}"
     else
@@ -437,20 +448,10 @@ class Output
     end
   end
 
-  def waypointLength=(length)
-    @waypointLength = length
-    debug "set waypoint id length to #{@waypointLength}"
-  end
-
-  def commentLimit=(logcount)
-    @commentLimit = logcount
-    debug "set log entry limit to #{@commentLimit}"
-  end
-
   # exploratory functions.
   def formatList
     formatList = Array.new
-    $FORMATS.each_key{ |format|
+    $allFormats.each_key{ |format|
       formatList.push(format)
     }
     formatList
@@ -458,19 +459,15 @@ class Output
 
 
   def formatExtension(format)
-    return $FORMATS[format]['ext']
-  end
-
-  def formatMIME(format)
-    return $FORMATS[format]['mime']
+    return $allFormats[format]['ext']
   end
 
   def formatDesc(format)
-    return $FORMATS[format]['desc']
+    return $allFormats[format]['desc']
   end
 
   def formatRequirement(format)
-    return $FORMATS[format]['required']
+    return $allFormats[format]['required']
   end
 
   ## sets up for the filtering process ################3
@@ -508,7 +505,8 @@ class Output
   def commit (file)
     debug2 "committing file type #{@outputType} to #{file}"
     if @outputFormat['filter_exec']
-      displayMessage "Executing #{@outputFormat['filter_exec']}"
+      displayInfo "Running output filter"
+      debug "Executing #{@outputFormat['filter_exec']}"
       exec = @outputFormat['filter_exec'].dup
       tmpfile = File.join($CACHE_DIR, @outputType + "." + rand(500000).to_s)
       exec.gsub!('INFILE', "\"#{tmpfile}\"")
@@ -522,13 +520,30 @@ class Output
       # if gpsbabel needs a style file, create it
       stylefile = nil
       if @outputFormat['filter_style']
-        stylefile = File.join($CACHE_DIR, @outputType + ".s_" + rand(500000).to_s)
-        File.open(stylefile, 'w'){ |f| f.write(@outputFormat['filter_style']) }
-        exec.gsub!('STYLEFILE', "\"#{stylefile}\"")
+        begin
+          stylefile = File.join($CACHE_DIR, @outputType + ".s_" + rand(500000).to_s)
+          File.open(stylefile, 'w'){ |f| f.write(@outputFormat['filter_style']) }
+          exec.gsub!('STYLEFILE', "\"#{stylefile}\"")
+        rescue => e
+          displayWarning "Failure to write style file: #{e}"
+        end
+      elsif @outputFormat['filter_style64']
+        begin
+          stylefile = File.join($CACHE_DIR, @outputType + ".s_" + rand(500000).to_s)
+          File.open(stylefile, 'w'){ |f| f.write(Base64.decode64(@outputFormat['filter_style64'])) }
+          exec.gsub!('STYLEFILE', "\"#{stylefile}\"")
+        rescue => e
+          displayWarning "Failure to write decoded style file: #{e}"
+        end
       end
 
       debug2 "exec = #{exec}"
-      ok = system(exec)
+      begin
+        ok = system(exec)
+        displayWarning "Non-zero return code #{$?.exitstatus}" if not ok
+      rescue => e
+        displayWarning "Something went wrong - error \"#{e}\""
+      end
       # clean up temp files
       begin
         File.unlink(tmpfile) if File.exists?(tmpfile)
@@ -540,8 +555,9 @@ class Output
       rescue
         displayWarning "Failed to unlink style file"
       end
-      if (! File.exists?(file))
-        displayWarning "Output filter did not create file #{file}. exec was: #{exec}"
+      if not File.exists?(file)
+        displayWarning "Output filter did not create file #{file}"
+        displayWarning " filter_exec was: #{exec}"
       end
     else
       debug3 "no exec"
@@ -565,13 +581,17 @@ class Output
         value = @outVars[var].to_s
       # convert to XML, with some special (online-able) effects for c:geo
       elsif (type == "wpEntity" or type == "wpXML")
-        value = makeXML(@wpHash[wid][var].to_s)
+        value = makeXML(@wpHash[wid][var].to_s) # modify=true, remove=true
       elsif (type == "wpEntityCgeo" or type == "wpCGEO")
-        value = makeXML(@wpHash[wid][var].to_s, removeImages=false, removeLinks=false)
+        value = makeXML(@wpHash[wid][var].to_s, modify=true, remove=false)
+      elsif (type == "wpEntityNone" or type == "wpXML0")
+        value = makeXML(@wpHash[wid][var].to_s, modify=false, remove=false)
       elsif (type == "outEntity" or type == "outXML")
-        value = makeXML(@outVars[var].to_s)
+        value = makeXML(@outVars[var].to_s) # modify=true, remove=true
       elsif (type == "outEntityCgeo" or type == "outCGEO")
-        value = makeXML(@outVars[var].to_s, removeImages=false, removeLinks=false)
+        value = makeXML(@outVars[var].to_s, modify=true, remove=false)
+      elsif (type == "outEntityNone" or type == "outXML0")
+        value = makeXML(@outVars[var].to_s, modify=false, remove=false)
       # convert to text
       elsif (type == "wpText")
         value = makeText(@wpHash[wid][var].to_s)
@@ -600,9 +620,7 @@ class Output
   end
 
   def deemoji(str, soft = true)
-    if not str or str.length == 0
-        return ""
-    end
+    return "" if str.to_s.empty?
     text = str.dup
     # pre-translate decimal into hex for large codepoints
     text.gsub!(/(\&#(\d+);)/) { ($2.to_i < 55296) ? $1 : ('&#x' + $2.to_i.to_s(16).upcase + ';') }
@@ -626,29 +644,29 @@ class Output
     return text
   end
 
-  def makeXML(str, removeImages=true, removeLinks=true)
-    if not str or str.length == 0
-        return ""
-    end
+  def makeXML(str, modify=true, remove=true)
+    return "" if str.to_s.empty?
     # issue 262: "emoji" seem to break GPSr devices
     text = deemoji(str, false)
-
-    # remove/tweak links, images
-    if removeLinks
-      # text-only link representation
-      text.gsub!(/<a\s.*?href=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>(.*?)<\/a.*?>/im){"[= #{$1} #{$2} =]"}
-    else
-      # clickable link
-      text.gsub!(/(<a\s.*?href=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>)(.*?)(<\/a.*?>)/im){"#{$1}[= #{$2} =] #{$3} #{$4}"}
-    end
     # remove smileys
     text = icons2Text(text.dup)
-    if removeImages
-      # text-only image representation
-      text.gsub!(/<img\s.*?src=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>/im){"[* #{$1} *]"}
-    else
-      # replace image reference by clickable link to avoid bandwidth consumption
-      text.gsub!(/<img\s.*?src=\s*[\'\"](https?:\/\/(.*?)[\'\"].*?)>/im){"<a href=\"#{$1}\">[* #{$2} *]</a>"}
+
+    if modify
+      # remove/tweak links, images
+      if remove
+        # text-only link representation
+        text.gsub!(/<a\s.*?href=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>(.*?)<\/a.*?>/im){"[= #{$1} #{$2} =]"}
+      else
+        # clickable link
+        text.gsub!(/(<a\s.*?href=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>)(.*?)(<\/a.*?>)/im){"#{$1}[= #{$2} =] #{$3} #{$4}"}
+      end
+      if remove
+        # text-only image representation
+        text.gsub!(/<img\s.*?src=\s*[\'\"]https?:\/\/(.*?)[\'\"].*?>/im){"[* #{$1} *]"}
+      else
+        # replace image reference by clickable link to avoid bandwidth consumption
+        text.gsub!(/<img\s.*?src=\s*[\'\"](https?:\/\/(.*?))[\'\"].*?>/im){"<a href=\"#{$1}\">[* #{$2} *]</a>"}
+      end
     end
 
     # fonts are not represented properly on most devices
@@ -661,9 +679,9 @@ class Output
 
     # escape HTML entities (including <>)
     begin
-        text = CGI.escapeHTML(text)
+      text = CGI.escapeHTML(text)
     rescue => e
-        debug "escapeHTML throws exception #{e} - use original"
+      debug "escapeHTML throws exception #{e} - use original"
     end
 
     # CGI.escapeHTML will try to re-escape previously escaped entities.
@@ -706,9 +724,9 @@ class Output
     # issue 262: may fail with "emoji" entities like &#xD83D;&#xDE03;
     text = deemoji(str)
     begin
-        text = CGI.unescapeHTML(text)
+      text = CGI.unescapeHTML(text)
     rescue => e
-        debug "unescapeHTML throws exception #{e} - use original"
+      debug "unescapeHTML throws exception #{e} - use original"
     end
     # compactify whitespace
     text.gsub!(/[\r\n]+/m, "\n") # was ' '
@@ -788,7 +806,7 @@ class Output
       "_wink" => '[;)]',
     }
     # translate smileys, remove other HTML img tags
-    return str.gsub(/<img.*?icon_smile(.*?)\.gif[^>]*>/im){iconmap[$1.downcase].to_s} #.gsub(/<\/img[^>]*>/im){""}
+    return str.gsub(/<img.*?icon_smile(.*?)\.gif[^>]*>/im){iconmap[$1.downcase].to_s}
   end
 
   def generatePreOutput(title)
@@ -807,19 +825,19 @@ class Output
       cache = @wpHash[wid]
       symbolHash[wid] = ''
 
-      if (cache['membersonly'])
+      if cache['membersonly']
         symbolHash[wid] << "<b><font color=\"#11CC11\">&#x24; </font></b>"
       end
 
-      if (cache['archived'])
+      if cache['archived']
         symbolHash[wid] << "<b><font color=\"#111111\">&Oslash; </font></b>"
       end
 
-      if (cache['disabled'] and not cache['archived'])
+      if cache['disabled'] and not cache['archived']
         symbolHash[wid] << "<b><font color=\"#CC1111\">&#x229e; </font></b>"
       end
 
-      if (cache['travelbug'])
+      if cache['travelbug']
         symbolHash[wid] << "<b><font color=\"#11CC11\">&euro;</font></b>"
       end
 
@@ -859,22 +877,23 @@ class Output
     debug "Generating comment XML for #{cache['name']}"
     brlf = "\&lt;br /\&gt;\n"
 
+    # remark finder id strings can be empty, do not insert userIDs or fake numbers
+
     # info log entry
-    if (@commentLimit > 0) && cache['ltime']
+    if (@commentLimit > 0) and cache['ltime']
       debug3 "info log entry"
       entry = ''
       entry << "    <groundspeak:log id=\"-2\">\n"
-      formatted_date = cache['ltime'].strftime("%Y-%m-%dT%H:%M:%SZ")
+      formatted_date = cache['ltime'].getgm.strftime("%Y-%m-%dT%H:%M:%SZ")
       entry << "      <groundspeak:date>#{formatted_date}</groundspeak:date>\n"
       entry << "      <groundspeak:type>Write note</groundspeak:type>\n"
-#      entry << "      <groundspeak:finder id=\"0\">**Info**</groundspeak:finder>\n"
       entry << "      <groundspeak:finder id=\"\">**Info**</groundspeak:finder>\n"
       entry << "      <groundspeak:text encoded=\"True\">\n"
       if cache['logcounts']
         entry << "Last log: #{cache['last_find_type']}" + brlf
         entry << "Stats: #{cache['logcounts']}" + brlf
       end
-      formatted_date = cache['ctime'].strftime("%Y-%m-%d")
+      formatted_date = cache['ctime'].getlocal.strftime("%Y-%m-%d")
       entry << "Placed: #{formatted_date}" + brlf
       entry << "D/T/S:  #{cache['difficulty']}/#{cache['terrain']}/#{cache['size']}"
       if cache['favfactor']
@@ -895,14 +914,14 @@ class Output
         break if (commentcount >= @commentLimit)
         # strip images from log entries
         comment_text = icons2Text(comment['text'].to_s)
-        comment_id = Zlib.crc32(comment_text)
+        formatted_date = comment['date'].getgm.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # we may actually have a valid logID, use that
+        comment_id = comment['log_id'] || Zlib.crc32(comment_text + formatted_date)
         debug3 "Comment ID: #{comment_id} by #{comment['user']}: #{comment_text}"
-        formatted_date = comment['date'].strftime("%Y-%m-%dT07:00:00.000Z")
         entry = ''
         entry << "    <groundspeak:log id=\"#{comment_id}\">\n"
         entry << "      <groundspeak:date>#{formatted_date}</groundspeak:date>\n"
         entry << "      <groundspeak:type>#{comment['type']}</groundspeak:type>\n"
-#        entry << "      <groundspeak:finder id=\"#{comment['user_id']}\">#{comment['user']}</groundspeak:finder>\n"
         entry << "      <groundspeak:finder id=\"\">#{comment['user']}</groundspeak:finder>\n"
         entry << "      <groundspeak:text encoded=\"True\">" + makeXML(comment_text) + "</groundspeak:text>\n"
         entry << "    </groundspeak:log>\n"
@@ -928,6 +947,7 @@ class Output
     cache['comments'].each{ |comment|
       break if (commentcount >= @commentLimit)
       comment_text = icons2Text(comment['text'].to_s)
+      formatted_date = comment['date'].getlocal.strftime("%Y-%m-%d")
       # unescape HTML in finder name
       comment_user = deemoji(comment['user'], false)
       begin
@@ -935,7 +955,7 @@ class Output
       rescue => e
         debug "unescapeHTML throws exception #{e} - use original"
       end
-      formatted_date = comment['date'].strftime("%Y-%m-%d")
+      debug3 "Comment by #{comment['user']}: #{comment_text}"
       entry = ''
       entry << "----------\n"
       entry << "*#{comment['type']}* by #{comment_user} on #{formatted_date}:\n"
@@ -960,7 +980,7 @@ class Output
     commentcount = 0
     cache['comments'].each{ |comment|
       break if (commentcount >= @commentLimit)
-      formatted_date = comment['date'].strftime("%Y-%m-%d")
+      formatted_date = comment['date'].getlocal.strftime("%Y-%m-%d")
       entry = ''
       entry << "<hr noshade size=\"1\" width=\"150\" align=\"left\"/>\n"
       entry << "<h4><em>#{comment['type']}</em> by #{comment['user']} on #{formatted_date}</h4>\n"
@@ -977,6 +997,7 @@ class Output
   end
 
   def decryptHint(hint)
+    decrypted = ''
     if hint
       # translate smileys
       hint2 = icons2Text(hint)
@@ -993,18 +1014,14 @@ class Output
         # join decrypted and unchanged fragments
         x }.join
       debug "full hint: #{decrypted}"
-      return decrypted
-    else
-      return ''
     end
+    return decrypted
   end
 
   # reduce HTML content (of waypoint table) to a minimum
   # suited for GPSr and parsing in toWptList()
   def reduceHtml(text)
-    if !text
-      return nil
-    end
+    return nil if not text
     # un-fix spaces
     new_text = text.gsub(/\s*\&nbsp;/, ' ')
     # remove images
@@ -1013,8 +1030,6 @@ class Output
     # note: this will drop waypoint URLs!
     new_text.gsub!(/\s*<a\s+[^>]*>/m, '')
     new_text.gsub!(/\s*<\/a>/m, '')
-    # not yet ready: do not remove but clean up hyperlinks
-    # new_text.gsub!(/\&RefID=[0-9a-f-]*\&RefDS=[0-9]/, '')
     # remove form elements
     new_text.gsub!(/\s*<input\s+[^>]*>/m, '')
     # remove table head
@@ -1040,9 +1055,7 @@ class Output
 
   # convert waypoint "table light" into a sequence of <wpt> elements
   def toWptList(text, timestamp)
-    if !text
-      return nil
-    end
+    return nil if not text
     # <table><tr><td>...</table> -> <wpt>...</wpt>
     # replace line breaks by visible separator
     hidden = false
@@ -1051,7 +1064,6 @@ class Output
     lookup = nil
     wpname = nil
     wptype = nil
-    #urlwid = ""
     coord = nil
     wplat = 0
     wplon = 0
@@ -1091,9 +1103,6 @@ class Output
             end
             # we must escape special characters in WP name (as in "Park & Ride")
             wpname = makeXML(wpname)
-            # we have thrown away the WID link in reduceHTML
-            # this may be bad, but for now we'll wait for requests
-            #widurl = ""
           elsif tdcount == 7
             # coords in "written" format
             coord = $1
@@ -1101,12 +1110,10 @@ class Output
             if coord =~ /([NS]) (\d+).*? ([\d\.]+) ([WE]) (\d+).*? ([\d\.]+)/
               wplat = ($2.to_f + $3.to_f / 60) * ($1 == 'S' ? -1:1)
               wplon = ($5.to_f + $6.to_f / 60) * ($4 == 'W' ? -1:1)
-              #hidden = false
             else # no coordinates ("???") -> <wpt>
+              # make "zero" waypoints available for c:geo etc.
               wplat = nil
               wplon = nil
-              # make "zero" waypoints available for c:geo etc.
-              ##hidden = true
             end
             # convert to shortened strings
             if wplat
@@ -1139,8 +1146,7 @@ class Output
             # Garmin Oregon shows only <desc>, not <cmt>, and limits to 48 chars
             # GSAK waypoints carry more info, c:geo can also handle locationless
             # return all info we may need, strip later
-            wptlist = wptlist +
-              "<wpt" +
+            wptlist << "<wpt" +
                 ((wplat and wplon) ? " lat=\"#{wplat}\" lon=\"#{wplon}\"" : "") +
                 ">\n" +
               "  <name>#{prefix}XXXWIDXXX</name>\n" +
@@ -1288,77 +1294,82 @@ class Output
 
     begin
     variables = {
-      'username' => @username,
-      'wid' => wid,
-      'guid' => cache['guid'].to_s,
-      'symbols' => symbols,
-      'id' => cache['sname'],
-      'mdate' => cache['mtime'].strftime("%Y-%m-%d"),
-      'cdate' => cache['ctime'].strftime("%Y-%m-%d"),
-      'cdateshort' => cache['ctime'].strftime("%y%m%d"),
-      'adate' => cache['atime'].strftime("%Y-%m-%d"),
-      'size' => (cache['size'] || 'empty').to_s.gsub(/ /, '_'),
-      'type8' => (cache['type'] || 'unknown').ljust(8),
-      'favcount' => (cache['favorites'] || 0).to_s,
-      'foundcount' => (cache['foundcount'] || '?').to_s,
-      'favfactor' => (cache['favfactor'] || 0.0).to_s,
-      'XMLDate' => cache['ctime'].strftime("%Y-%m-%dT07:00:00.000Z"),
+      'username'    => @username,
+      'wid'         => wid,
+      'guid'        => cache['guid'].to_s,
+      'symbols'     => symbols,
+      'id'          => cache['sname'],
+      'csize'       => cache['size'].capitalize,
+      'ctime'       => cache['ctime'].getgm.strftime("%Y-%m-%dT%H:%M:%SZ"),
+      'ctime_hm'    => cache['ctime'].getgm.strftime("%Y-%m-%dT%H:%MZ"),
+      'cdate'       => cache['ctime'].getlocal.strftime("%Y-%m-%d"),
+      'cdateshort'  => cache['ctime'].getlocal.strftime("%y%m%d"),
+      'atime'       => cache['atime'].getgm.strftime("%Y-%m-%dT%H:%M:%SZ"),
+      'atime_hm'    => cache['atime'].getgm.strftime("%Y-%m-%dT%H:%MZ"),
+      'adate'       => cache['atime'].getlocal.strftime("%Y-%m-%d"),
+      'mtime'       => cache['mtime'].getgm.strftime("%Y-%m-%dT%H:%M:%SZ"),
+      'mtime_hm'    => cache['mtime'].getgm.strftime("%Y-%m-%dT%H:%MZ"),
+      'mdate'       => cache['mtime'].getlocal.strftime("%Y-%m-%d"),
+      'size'        => (cache['size'] || 'empty').to_s.gsub(/ /, '_'),
+      'type8'       => (cache['type'] || 'unknown').ljust(8),
+      'favcount'    => (cache['favorites'] || 0).to_s,
+      'foundcount'  => (cache['foundcount'] || '?').to_s,
+      'favfactor'   => (cache['favfactor'] || 0.0).to_s,
       'latdatapad5' => sprintf("%2.5f", cache['latdata'] || 0.0),
       'londatapad5' => sprintf("%2.5f", cache['londata'] || 0.0),
       'latdatapad6' => sprintf("%2.6f", cache['latdata'] || 0.0),
       'londatapad6' => sprintf("%2.6f", cache['londata'] || 0.0),
-      'latdegmin' => lat2str(cache['latdata'] || 0.0, degsign=':').gsub(/ */, '').gsub(/([NSEW])0+/, '\1'),
-      'londegmin' => lon2str(cache['londata'] || 0.0, degsign=':').gsub(/ */, '').gsub(/([NSEW])0+/, '\1'),
-      'maps_url' => "#{GOOGLE_MAPS_URL}?q=#{coord_query}",
+      'latdegmin'   => lat2str(cache['latdata'] || 0.0, degsign=':').gsub(/ */, '').gsub(/([NSEW])0+/, '\1'),
+      'londegmin'   => lon2str(cache['londata'] || 0.0, degsign=':').gsub(/ */, '').gsub(/([NSEW])0+/, '\1'),
+      'maps_url'    => "#{GOOGLE_MAPS_URL}?q=#{coord_query}",
       'IsAvailable' => (available == true).to_s.capitalize,
-      'IsArchived' => (archived == true).to_s.capitalize,
-      'IsPremium' => (cache['membersonly'] == true).to_s, # do not capitalize!
-      'FavPoints' => cache['favorites'] || 0,
+      'IsArchived'  => (archived == true).to_s.capitalize,
+      'IsPremium'   => (cache['membersonly'] == true).to_s, # do not capitalize!
+      'FavPoints'   => cache['favorites'] || 0,
       # cartridge CGUID has 36 characters, so has the "dummy" one
-      'cartridge' => (cache['cartridge'] || '_no_link_to_wherigo_cartridge_found_'),
-      'location' => location,
-      'relativedistance' => relative_distance,
+      'cartridge'   => (cache['cartridge'] || '_no_link_to_wherigo_cartridge_found_'),
+      'location'    => location,
+      'relativedistance'   => relative_distance,
       'relativedistancekm' => relative_distance_km,
       'hintdecrypt' => decryptHint(cache['hint']),
-      'hint' => cache['hint'],
+      'hint'        => cache['hint'],
       'cacheSymbol' => symbol,
-      'cacheID' => cacheID(wid),
-      'logID' => (100000000001 + @wpHash.length - cache['index'].to_i),
-      'trackables' => cache['travelbug'].to_s,
+      'cacheID'     => cacheID(wid),
+      'logID'       => (100000000001 + @wpHash.length - cache['index'].to_i),
+      'trackables'  => cache['travelbug'].to_s,
       'xmlTrackables' => xmlTrackables,
-      'shortWpts' => shortWpts.to_s,
+      'shortWpts'   => shortWpts.to_s,
       'xmlWptsCgeo' => xmlWptsCgeo.to_s.gsub(/XXXWIDXXX/, wid[2..-1]),
       'xmlWptsGsak' => xmlWptsGsak.to_s.gsub(/XXXWIDXXX/, wid[2..-1]),
-      'xmlWpts' => xmlWpts.to_s.gsub(/XXXWIDXXX/, wid[2..-1]),
-      'xmlAttrs' => xmlAttrs.to_s,
-      'txtAttrs' => (cache['attributeText'].to_s.empty?) ? '' : '[' + cache['attributeText'].to_s.capitalize.gsub(/\\/, "/") + ']',
-      'warnAvail' => (available or archived) ? '' : '[?]',
-      'warnArchiv' => (archived) ? '[%]' : '',
-      'premiumOnly' => (cache['membersonly'] ? ('[$' + (cache['olddesc'] ? '+' : '') + ']') : ''),
-      'nuvi' => cache['type'][0..1].capitalize +
+      'xmlWpts'     => xmlWpts.to_s.gsub(/XXXWIDXXX/, wid[2..-1]),
+      'xmlAttrs'    => xmlAttrs.to_s,
+      'txtAttrs'    => (cache['attributeText'].to_s.empty?) ? '' : '[' + cache['attributeText'].to_s.capitalize.gsub(/\\/, "/") + ']',
+      'warnAvail'   => (available or archived) ? '' : '[?]',
+      'warnArchiv'  => (archived) ? '[%]' : '',
+      'premiumOnly' => (cache['membersonly'] ? ('[$' + (cache['olddesc'] ? '+' : '') + (cache['moved'] ? 'm' : '') + ']') : ''),
+      'nuvi'        => cache['type'][0..1].capitalize +
         sprintf("%.1f", cache['difficulty']).gsub(/\.5/, '\'').gsub(/\.0/, '.') +
         sprintf("%.1f", cache['terrain']).gsub(/\.5/, '\'').gsub(/\.0/, '.') +
         cache['size'][0..1].capitalize +
           ((cache['membersonly']) ? '$' : '') +
-            (cache['olddesc'] ? '+' : '') +
+            (cache['olddesc'] ? '+' : '') + (cache['moved'] ? 'm' : '') +
           ((archived) ? '%' : '') +
           ((available or archived) ? '' : '?'),
       # Premium/Archive/Disabled
-      'pad' => ((cache['membersonly']) ? '$' : '') +
-            (cache['olddesc'] ? '+' : '') +
-          ((archived) ? '%' : '') +
-          ((available or archived) ? '' : '?'),
+      'pad'         => ((cache['membersonly']) ? '$' : '') +
+                        (cache['olddesc'] ? '+' : '') + (cache['moved'] ? 'm' : '') +
+                        ((archived) ? '%' : '') +
+                        ((available or archived) ? '' : '?'),
     }
     rescue => e
       displayWarning "Problem (#{e}) while converting cache #{wid}:\n#{cache.inspect}"
       displayError "Backtrace: #{e.backtrace}"
     end
-    # although implicit:
     return variables
   end
 
   def generateOutput(title)
-    debug3 "generating output: #{@outputType} - #{$FORMATS[@outputType]['desc']}"
+    debug3 "generating output: #{@outputType} - #{$allFormats[@outputType]['desc']}"
     @outVars = Hash.new
     @outVars['title'] = title
     @outVars['version'] = GTVersion.version
@@ -1366,7 +1377,6 @@ class Output
     updateShortNames()
     output = generatePreOutput(title)
 
-    # ** This will be removed for GeoToad 4.0, when we use a real templating engine that can do loops **
     if @outputType =~ /html/
       html_index, symbolHash = generateHtmlIndex()
       output << html_index
@@ -1379,11 +1389,8 @@ class Output
     helpindex = 0
     @wpHash.keys.each{ |wid|
       helpindex += 1
-      index = @wpHash[wid]['index']
       # in "-q wid" mode, there's no index
-      if not index
-        index = helpindex
-      end
+      index = @wpHash[wid]['index'] || helpindex
       wpSearchOrder[index] = wid
     }
     # remove unset elements ([0])
@@ -1419,25 +1426,28 @@ class Output
       @outVars['textlogs'] = createTextCommentLogs(cache)
       @outVars['htmllogs'] = createHTMLCommentLogs(cache)
       # make output conditional
-      if @outputFormat['conditionWP']
-        conditionWP = @outputFormat['conditionWP']
+      willOutput = true
+      if @outputFormat['conditionWP'] or @conditionWP
+        condition1 = @outputFormat['conditionWP'] || true
+        condition2 = @conditionWP || true
+        conditionWP = "( (#{condition1}) and (#{condition2}) )"
         debug "WP condition #{conditionWP.inspect}"
         condition = replaceVariables(conditionWP, wid)
+        debug "gives condition #{condition.inspect}"
         begin
           willOutput = eval(condition)
+          debug "result #{willOutput.inspect}"
         rescue => e
-          displayWarning "Problem with output condition \"#{condition}\":\n\t#{e}"
+          displayWarning "Problem with output condition \"#{condition}\":\n\t#{e}, assuming false"
           willOutput = false
         end
         debug "WP condition for #{wid}: #{willOutput.inspect}"
-      else
-        willOutput = true
       end
       if willOutput
         outputadd = replaceVariables(@outputFormat['templateWP'], wid)
         maxlength = @outputFormat['maxlengthWP']
         if maxlength and outputadd.length > maxlength
-          output << outputadd[0..maxlength-1] + outputadd[-1..-1]
+          output << outputadd[0..maxlength-2] + "_" #+ outputadd[-1..-1]
         else
           output << outputadd
         end

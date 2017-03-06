@@ -48,7 +48,6 @@ module Messages
 
   # display boxed text
   def displayBox(text, len = 78)
-    #puts "| #{text.ljust(len-4)} |"[0..(len-1)]
     if text.length <= (len-4)
       # single-line output
       puts "| #{text.ljust(len-4)} |"
@@ -61,10 +60,10 @@ module Messages
 
   # fatal errors
   def displayError(text)
-    if text.to_s.length > 0
-      abort("ERROR: #{text}")
-    else
+    if text.to_s.empty?
       abort("")
+    else
+      abort("ERROR: #{text}")
     end
   end
 end

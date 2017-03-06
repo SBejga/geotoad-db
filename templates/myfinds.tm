@@ -4,12 +4,11 @@ template = {
   # geotoad -u $USERNAME -p ... -x myfindgpx -o myfinds.gpx -z --includeArchived -Z -q user $USERNAME
   'myfindgpx' => {
     'ext'  => 'gpx',
-    'mime' => 'text/ascii',
     'desc' => 'GPX Geocaching XML (my finds)',
     'templatePre'  =>
       "<?xml version=\'1.0\' encoding=\'UTF-8\' standalone=\'yes\' ?>\n" +
       "<gpx" +
-       " version=\"1.0\" creator=\"GeoToad\"" +
+       " version=\"1.0\" creator=\"GeoToad <%outEntity.version%>\"" +
        " xsi:schemaLocation=\"" +
          "http://www.topografix.com/GPX/1/0 http://www.topografix.com/GPX/1/0/gpx.xsd" +
         " http://www.groundspeak.com/cache/1/0/1 http://www.groundspeak.com/cache/1/0/1/cache.xsd" +
@@ -21,13 +20,11 @@ template = {
        ">\n" +
       "<name>My Finds Pocket Query</name>\n" +
       "<desc><%outEntity.title%></desc>\n" +
-      "<author>GeoToad <%outEntity.version%></author>\n" +
-      "<email>geotoad@googlegroups.com</email>\n" +
-      "<time>" + Time.new.gmtime.strftime("%Y-%m-%dT%H:%M:%S")  + ".000Z</time>\n" +
+      "<time>" + Time.new.gmtime.strftime("%Y-%m-%dT%H:%M:%S.000Z")  + "</time>\n" +
       "<keywords>cache, geocache, groundspeak, geotoad</keywords>\n",
     'templateWP'   =>
       "<wpt lat=\"<%out.latdatapad5%>\" lon=\"<%out.londatapad5%>\">\n" +
-      "  <time><%out.cdate%>T08:00:00Z</time>\n" +
+      "  <time><%out.ctime%></time>\n" +
       "  <name><%outEntity.id%></name>\n" +
       "  <desc><%wpEntity.name%> by <%wpEntity.creator%>, <%wp.fulltype%> (<%wp.difficulty%>/<%wp.terrain%>)</desc>\n" +
       "  <url>http://www.geocaching.com/seek/cache_details.aspx?guid=<%out.guid%></url>\n" +
@@ -39,7 +36,7 @@ template = {
       "  <groundspeak:placed_by><%wpEntity.creator%></groundspeak:placed_by>\n" +
       "  <groundspeak:owner id=\"<%wpEntity.creator_id%>\"><%wpEntity.creator%></groundspeak:owner>\n" +
       "  <groundspeak:type><%wp.fulltype%></groundspeak:type>\n" +
-      "  <groundspeak:container><%wp.size%></groundspeak:container>\n" +
+      "  <groundspeak:container><%out.csize%></groundspeak:container>\n" +
       "  <groundspeak:attributes>\n" +
       "<%out.xmlAttrs%>" +
       "  </groundspeak:attributes>\n" +
@@ -52,7 +49,7 @@ template = {
       "  <groundspeak:encoded_hints>hint</groundspeak:encoded_hints>\n" +
       "  <groundspeak:logs>\n" +
       "    <groundspeak:log id=\"<%out.logID%>\">\n" +
-      "      <groundspeak:date><%out.adate%>T08:00:00Z</groundspeak:date>\n" +
+      "      <groundspeak:date><%out.atime%></groundspeak:date>\n" +
       "      <groundspeak:type>Found it</groundspeak:type>\n" +
       "      <groundspeak:finder id=\"666\"><%outEntity.username%></groundspeak:finder>\n" +
       "      <groundspeak:text encoded=\"False\"></groundspeak:text>\n" +
@@ -67,7 +64,6 @@ template = {
 
   'myfindlist' => {
     'ext'  => 'lst',
-    'mime' => 'text/plain',
     'desc' =>     'Table, whitespace delimited (my finds)',
     'templatePre'  => "",
     'templateWP'   =>
@@ -81,12 +77,11 @@ template = {
   # geotoad -u $USERNAME -p ... -x yourfindgpx -o yourfinds.gpx -z -Z --includeArchived -q user $ANOTHERUSERNAME
   'yourfindgpx' => {
     'ext'  => 'gpx',
-    'mime' => 'text/ascii',
     'desc' => 'GPX Geocaching XML (user finds)',
     'templatePre'  =>
       "<?xml version=\'1.0\' encoding=\'UTF-8\' standalone=\'yes\'?>\n" +
       "<gpx" +
-       " version=\"1.0\" creator=\"GeoToad\"" +
+       " version=\"1.0\" creator=\"GeoToad <%outEntity.version%>\"" +
        " xsi:schemaLocation=\"" +
          "http://www.topografix.com/GPX/1/0 http://www.topografix.com/GPX/1/0/gpx.xsd" +
         " http://www.groundspeak.com/cache/1/0/1 http://www.groundspeak.com/cache/1/0/1/cache.xsd" +
@@ -98,13 +93,11 @@ template = {
        ">\n" +
       "<name>My Finds Pocket Query</name>\n" +
       "<desc><%outEntity.title%></desc>\n" +
-      "<author>GeoToad <%outEntity.version%></author>\n" +
-      "<email>geotoad@googlegroups.com</email>\n" +
-      "<time>" + Time.new.gmtime.strftime("%Y-%m-%dT%H:%M:%S")  + ".000Z</time>\n" +
+      "<time>" + Time.new.gmtime.strftime("%Y-%m-%dT%H:%M:%S.000Z")  + "</time>\n" +
       "<keywords>cache, geocache, groundspeak, geotoad</keywords>\n",
     'templateWP'   =>
       "<wpt lat=\"<%out.latdatapad6%>\" lon=\"<%out.londatapad6%>\">\n" +
-      "  <time><%out.cdate%>T08:00:00Z</time>\n" +
+      "  <time><%out.ctime%></time>\n" +
       "  <name><%outEntity.id%></name>\n" +
       "  <desc><%wpEntity.name%> by <%wpEntity.creator%>, <%wp.fulltype%> (<%wp.difficulty%>/<%wp.terrain%>)</desc>\n" +
       "  <url>http://www.geocaching.com/seek/cache_details.aspx?guid=<%out.guid%></url>\n" +
@@ -116,7 +109,7 @@ template = {
       "  <groundspeak:placed_by><%wpEntity.creator%></groundspeak:placed_by>\n" +
       "  <groundspeak:owner id=\"<%wpEntity.creator_id%>\"><%wpEntity.creator%></groundspeak:owner>\n" +
       "  <groundspeak:type><%wp.fulltype%></groundspeak:type>\n" +
-      "  <groundspeak:container><%wp.size%></groundspeak:container>\n" +
+      "  <groundspeak:container><%out.csize%></groundspeak:container>\n" +
       "  <groundspeak:attributes>\n" +
       "<%out.xmlAttrs%>" +
       "  </groundspeak:attributes>\n" +
@@ -129,7 +122,7 @@ template = {
       "  <groundspeak:encoded_hints>hint</groundspeak:encoded_hints>\n" +
       "  <groundspeak:logs>\n" +
       "    <groundspeak:log id=\"<%out.logID%>\">\n" +
-      "      <groundspeak:date><%out.mdate%>T08:00:00Z</groundspeak:date>\n" +
+      "      <groundspeak:date><%out.mtime%></groundspeak:date>\n" +
       "      <groundspeak:type>Found it</groundspeak:type>\n" +
       "      <groundspeak:finder id=\"666\"><%outEntity.username%></groundspeak:finder>\n" +
       "      <groundspeak:text encoded=\"False\"></groundspeak:text>\n" +
@@ -144,7 +137,6 @@ template = {
 
   'yourfindlist' => {
     'ext'  => 'lst',
-    'mime' => 'text/plain',
     'desc' =>     'Table, whitespace delimited (user finds)',
     'templatePre'  => "",
     'templateWP'   =>

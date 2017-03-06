@@ -1,14 +1,14 @@
 # A library for automatic location searches, using the Google Geocoding API v3
 # see documentation https://developers.google.com/maps/documentation/geocoding/
 
-require 'common'
 require 'cgi'
-require 'shadowget'
-
-MAPS_URL = 'http://maps.googleapis.com/maps/api/geocode/xml?sensor=false'
-CACHE_SECONDS = 86400 * 60
+require 'lib/common'
+require 'lib/messages'
+require 'lib/shadowget'
 
 class GeoCode
+
+  @@maps_base = 'http://maps.googleapis.com/maps/api/geocode/xml?sensor=false'
 
   include Common
   include Messages
@@ -42,14 +42,14 @@ class GeoCode
 
   def create_url(location, type)
     q = CGI.escape(location)
-    url = "#{MAPS_URL}&#{type}=#{q}"
+    url = @@maps_base + "&#{type}=#{q}"
     debug2 "geocode url: #{url}"
     return url
   end
 
   def get_url(url)
     http = ShadowFetch.new(url)
-    http.localExpiry = CACHE_SECONDS
+    http.localExpiry = 30 * $DAY
     http.maxFailures = 5
     http.useCookie = false
     results = http.fetch

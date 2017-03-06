@@ -2,22 +2,33 @@
 
 require 'time'
 require 'zlib'
+require 'lib/common'
+require 'lib/messages'
+require 'lib/geodist'
+require 'lib/logbook'
+require 'lib/gallery'
 
 class CacheDetails
 
-  attr_writer :useShadow, :cookie
-  attr_accessor :preserve
-
   include Common
   include Messages
+  # only required for "moved PMO":
+  include GeoDist
+  include LogBook
+  include Gallery
 
   # Use a printable template that shows the last 10 logs.
   @@baseURL = "https://www.geocaching.com/seek/cdpf.aspx"
 
+  attr_writer :preserve
+  attr_writer :getlogbk
+  attr_writer :getimage
+
   def initialize(data)
     @waypointHash = data
-    @useShadow = 1
     @preserve = nil
+    @getlogbk = nil
+    @getimage = nil
 
     @cachetypenum = {
 	'2'	=> 'Traditional Cache',
@@ -63,20 +74,22 @@ class CacheDetails
     @@baseURL
   end
 
-  # this routine is for compatibility.
-  def fetchWid(id)
-    fetch(id)
-  end
+#  # this routine is for compatibility.
+#  def fetchWid(id)
+#    fetch(id)
+#  end
 
   def getRemoteMapping(wid)
-    # get guid via GC code lookup
-    guid = getRemoteMapping1(wid)
-    if guid
-      return guid
-    end
+    # get guid from gallery RSS
+    guid = getRemoteMapping3(wid)
+    return [guid, '3'] if guid
     # get guid from cache_details page
+    guid = getRemoteMapping1(wid)
+    return [guid, '1'] if guid
+    # get guid from log entry page
     guid = getRemoteMapping2(wid)
-    return guid
+    return [guid, '2'] if guid
+    return [nil, '0']
   end
 
   def getRemoteMapping1(wid)
@@ -85,9 +98,9 @@ class CacheDetails
     guid = nil
     @pageURL = 'https://www.geocaching.com/seek/cache_details.aspx?wp=' + wid
     page = ShadowFetch.new(@pageURL)
-    page.localExpiry = 14 * 24 * 3600	# or even longer
+    page.localExpiry = -1
     data = page.fetch
-    if data =~ /cdpf\.aspx\?guid=([\w-]+)/m
+    if data =~ /cdpf\.aspx\?guid=([0-9a-f-]{36})/m
       guid = $1
       debug2 "Found GUID: #{guid}"
       return guid
@@ -103,12 +116,12 @@ class CacheDetails
     guid = nil
     @pageURL = 'https://www.geocaching.com/seek/log.aspx?ID=' + logid.to_s + '&lcn=1'
     page = ShadowFetch.new(@pageURL)
-    page.localExpiry = 1 * 24 * 3600	# make this short to overcome locks
+    page.localExpiry = -1
     data = page.fetch
     if data =~ /The listing has been locked/m
       displayWarning "#{wid} logbook is locked, cannot map"
     end
-    if data =~ /cache_details\.aspx\?guid=([\w-]+)/m
+    if data =~ /cache_details\.aspx\?guid=([0-9a-f-]{36})/m
       guid = $1
       debug2 "Found GUID: #{guid}"
       return guid
@@ -117,17 +130,35 @@ class CacheDetails
     return nil
   end
 
+  def getRemoteMapping3(wid)
+    debug "Get GUID from gallery for #{wid}"
+    # extract mapping from cache_details page
+    guid = nil
+    @pageURL = 'https://www.geocaching.com/datastore/rss_galleryimages.ashx?id=' + cacheID(wid).to_s
+    page = ShadowFetch.new(@pageURL)
+    page.localExpiry = -1
+    page.useCookie = false
+    page.closingHTML = false
+    data = page.fetch
+    if data =~ /cache_details\.aspx\?guid=([0-9a-f-]{36})/m
+      guid = $1
+      debug2 "Found GUID: #{guid}"
+      return guid
+    end
+    debug "Could not map(3) #{wid} to GUID"
+    return nil
+  end
+
   def fullURL(id)
     if (id =~ /^GC/)
-      # If we can look up the guid, use it. It's not actually required, but
-      # it behaves a lot more like a standard web browser on the gc.com website.
-      if ! @waypointHash[id]['guid']
+      # look up guid
+      if not @waypointHash[id]['guid']
         # there is no cdpf.aspx?wp=...
         guid = getMapping(id.to_s)
         debug2 "dictionary maps #{id.inspect} to #{guid.inspect}"
         if not guid
-          # it's not in the dictionary; try to map using the "unpub" interface
-          guid = getRemoteMapping(id.to_s)
+          # it's not in the dictionary; try to map
+          guid, src = getRemoteMapping(id.to_s)
         end
         if not guid
           # no way
@@ -135,7 +166,7 @@ class CacheDetails
           return nil
         end
         debug2 "mapped #{id.inspect} to #{guid.inspect}"
-        appendMapping(id, guid)
+        appendMapping(id, guid, "(#{src})")
         @waypointHash[id]['guid'] = guid
       end
       suffix = 'guid=' + @waypointHash[id]['guid'].to_s
@@ -146,17 +177,15 @@ class CacheDetails
   end
 
   # fetches by geocaching.com sid
-  def fetch(id)
+  def fetchWid(id)
     if id.to_s.empty?
-      displayError "Empty fetch by id, quitting."
+      displayError "Empty fetch by wid, quitting."
       exit
     end
 
     url = fullURL(id)
     # no valid url (wid doesn't point to guid)
-    #return 'subscriber-only' if url.to_s.empty?
-    # force it even if there's nothing to tell
-    return nil if url.to_s.empty?
+    return [nil, nil] if url.to_s.empty?
     page = ShadowFetch.new(url)
 
     # Tune expiration for young caches:
@@ -187,6 +216,7 @@ class CacheDetails
       page.localExpiry = ttl
     end
     page.fetch()
+    src = page.src
     if page.data
       success = parseCache(page.data)
     else
@@ -194,28 +224,15 @@ class CacheDetails
       success = nil
     end
 
-#    # We try to download the page one more time.
-#    if ! success
-#      debug "Trying to download #{url} again."
-#      sleep(5)
-#      page.invalidate()
-#      page.fetch()
-#      if page.data
-#        success = parseCache(page.data)
-#      end
-#    end
-
     # success is hash; nil or string if problem
     if success.class != Hash
       message = "Could not parse #{url}."
       if success.class == String
         message << " (#{success})"
       end
-#      displayWarning message
       debug message
-#      page.invalidate()
     end
-    return success
+    return [success, src]
   end
 
 # calculate fav factor
@@ -358,7 +375,7 @@ class CacheDetails
         end
         debug "wid = #{wid} name=#{name} creator=#{creator}"
         cache = @waypointHash[wid]
-        if ! cache.key?('visitors')
+        if not cache.key?('visitors')
           cache['visitors'] = []
         end
         if name and creator
@@ -374,6 +391,7 @@ class CacheDetails
         end
         cache['shortdesc'] = ''
         cache['longdesc'] = ''
+        cache['comments'] = []
         cache['favfactor'] = 0
 #        cache['url'] = "http://www.geocaching.com/geocache/" + wid
         cache['url'] = "http://coord.info/" + wid
@@ -396,7 +414,7 @@ class CacheDetails
         else
           displayWarning "Cache image code #{ccode} for #{full_type} - please report"
         end
-        if ! cache
+        if not cache
           displayWarning "Found waypoint type, but never saw cache title. Did geocaching.com change their layout again?"
         end
         debug "Found alternative name #{name.inspect}"
@@ -466,7 +484,7 @@ class CacheDetails
         nextline_coords = true
       end
       # changed 2014-01-14
-      if nextline_coords && (line =~ /([NS]) (\d+).*? ([\d\.]+) ([EW]) (\d+).*? ([\d\.]+)/)
+      if nextline_coords and (line =~ /([NS]) (\d+).*? ([\d\.]+) ([EW]) (\d+).*? ([\d\.]+)/)
         cache['latwritten'] = $1 + ' ' + $2 + '° ' + $3
         cache['lonwritten'] = $4 + ' ' + $5 + '° ' + $6
         cache['latdata'] = ($2.to_f + $3.to_f / 60) * ($1 == 'S' ? -1 : 1)
@@ -481,7 +499,7 @@ class CacheDetails
         warning = $1
         warning.gsub!(/<.*?>/, '')
         debug "got a warning: #{warning}"
-        if (wid)
+        if wid
           if warning =~ /has been archived/
             if cache['archived'].nil?
               debug "last resort setting cache to archived"
@@ -542,7 +560,7 @@ class CacheDetails
       # wherigo cartridge link
       # http://www.wherigo.com/cartridge/details.aspx?CGUID=...
       # http://www.wherigo.com/cartridge/download.aspx?CGUID=...
-      if line =~ /(www\.wherigo\.com\/cartridge\/\w+.aspx\?CGUID=([0-9a-f-]+))/
+      if line =~ /(www\.wherigo\.com\/cartridge\/\w+.aspx\?CGUID=([0-9a-f-]{36}))/
         debug "Wherigo cartridge at #{$1}"
         # do not overwrite with later ones
         if not cache['cartridge']
@@ -559,9 +577,18 @@ class CacheDetails
         jslat = $1
         jslon = $2
         debug "got javascript lat/lon #{jslat}/#{jslon}"
+        # (1) normal behaviour (BM doesn't see PMO coords)
         if not cache['membersonly'] and ( not cache['latdata'] or not cache['londata'] )
+        # (2) only fill in if nothing there (ignore moved caches with old desc)
+        #if ( not cache['latdata'] or not cache['londata'] )
+        # (3) get the most of all available information (old & new PMO location)
+        #if cache['membersonly'] or ( not cache['latdata'] or not cache['londata'] )
+          oldlat = cache['latdata']
+          oldlon = cache['londata']
           cache['latdata'] = jslat
           cache['londata'] = jslon
+          newlat = jslat
+          newlon = jslon
           # "written" style, whatever that's good for.
           cache['latwritten'] = lat2str(jslat, degsign="°")
           cache['lonwritten'] = lon2str(jslon, degsign="°")
@@ -569,6 +596,14 @@ class CacheDetails
             debug "rewrite lat/lon for PMO #{wid}"
           else
             debug "last resort lat/lon for #{wid}"
+          end
+          if ( oldlat and oldlon ) and
+             ( ( (newlat.to_f - oldlat.to_f).abs + (newlon.to_f - oldlon.to_f).abs ) > 0.00001 )
+            # cache has moved, description and hint may be inaccurate - set mark
+            movedDistance, movedDirection = geoDistDir(oldlat, oldlon, newlat, newlon)
+            movedDistance = (movedDistance.to_f * 1000 * $MILE2KM).round
+            displayInfo "Moved from #{oldlat}/#{oldlon} to #{newlat}/#{newlon} (#{movedDistance}m@#{movedDirection})"
+            cache['moved'] = true
           end
         end
       end
@@ -606,13 +641,14 @@ class CacheDetails
     if data =~ />\s*(Placed|Event) Date\s*:\s*([\w \/\.-]+)\s*</m
         what = $1
         date = $2
+        debug2 "#{$1}: #{$2}"
         if date != 'N/A'
           # do not overwrite what we got from search
           ctime = parseDate(date)
           if not cache['ctime']
-            cache['time'] = ctime
+            cache['ctime'] = ctime
           elsif (ctime != cache['ctime'])
-            debug2 "ctime changed: " + cache['ctime'].strftime("%Y-%m-%d") + " -> " + ctime.strftime("%Y-%m-%d")
+            debug2 "ctime changed?: " + cache['ctime'].getlocal.strftime("%Y-%m-%d") + " -> " + ctime.getlocal.strftime("%Y-%m-%d")
           end
           cache['cdays'] = daysAgo(cache['ctime'])
           if what =~ /Event/
@@ -753,19 +789,36 @@ class CacheDetails
 
     # Parse the additional waypoints table. Needs additional work for non-HTML templates.
     comments, last_find_date, visitors = parseComments(data, cache['creator'])
-    cache['visitors'] = cache['visitors'] + visitors
-    cache['comments'] = comments
+    cache['visitors'] << visitors
+    if comments.length > 0 and cache['membersonly']
+      # there are logs, cache was not PMO before
+      cache['olddesc'] = true
+    end
+    # do we want to retrieve the geocache.logbook?
+    if @getlogbk
+      # even if there are old logs from pre-PMO times
+      if comments.length <= 0 or cache['membersonly']
+        # try to get log entries from logbook page instead
+        debug "Get logbook for guid #{cache['guid']}"
+        newcomments, logtimestamp = getLogBook(cache['guid'])
+        if newcomments.length > 0
+          comments = newcomments
+          cache['ltime'] = logtimestamp
+        end
+      end
+    end
     if comments.length > 0
       cache['last_find_type'] = comments[0]['type']
       cache['last_find_days'] = daysAgo(comments[0]['date'])
+      if not last_find_date
+        last_find_date = comments[0]['date']
+      end
       # Remove possibly unpaired font tags (issue 231)
       (0...comments.length).each{ |c|
-        cache['comments'][c]['text'].gsub!(/<\/?font[^>]*>/, '')
+        comments[c]['text'].gsub!(/<\/?font[^>]*>/, '')
       }
-      if cache['membersonly']
-        cache['olddesc'] = true
-      end
     end
+    cache['comments'] = comments
 
     if (not cache['mdays'] or cache['mdays'] == -1) and last_find_date
       cache['mtime'] = last_find_date
@@ -774,7 +827,7 @@ class CacheDetails
 
     if not cache['ctime']
       cache['cdays'] = -1
-      cache['ctime'] = Time.now
+      cache['ctime'] = Time.at($ZEROTIME)
     end
 
     # if event is in the past (yesterday or before) it's unavailable
@@ -825,6 +878,16 @@ class CacheDetails
     end
     if not cache['type']
       cache['type'] = 'empty'
+    end
+
+    # daniel.k.ache: links to gallery images
+    # @getimage comes as string or nil
+    gi = @getimage.to_i
+    if (gi > 0)
+      cache['gallery'] = getImageLinks(cache['guid'], cacheimages=((gi & 1) != 0), logimages=((gi & 2) != 0))
+      #cache['longdesc'] << '<hr />' + cache['gallery']
+    else
+      cache['gallery'] = ''
     end
 
     return cache
@@ -949,7 +1012,10 @@ class CacheDetails
       debug2 "comment date: #{datestr}, icon: #{icon}, type: #{type}, user: #{user}"
       # strip "icon_" from old style image name
       icon.gsub!(/^icon_/, '')
-      date = Time.parse(datestr)
+      # parseDate cannot handle this
+      #date = parseDate(datestr)
+      # use Time.parse, add 12 hours
+      date = Time.parse(datestr) + (12 * $HOUR)
       # "found it" or "attended"
       if (icon == 'smile' or icon == '2') or (icon == 'attended' or icon == '10')
         visitors << user.downcase

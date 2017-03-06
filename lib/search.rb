@@ -1,7 +1,9 @@
 require 'cgi'
-require 'geocode'
-require 'shadowget'
 require 'time'
+require 'lib/common'
+require 'lib/messages'
+require 'lib/geocode'
+require 'lib/shadowget'
 
 
 class SearchCache
@@ -9,14 +11,15 @@ class SearchCache
   include Common
   include Messages
 
-  attr_accessor :distance, :max_pages
+  attr_writer :distance
+  attr_writer :max_pages
 
   @@base_url = 'https://www.geocaching.com/seek/nearest.aspx'
 
   def initialize
     @distance = 15
     @max_pages = 0		# unlimited
-    @ttl = 20 * 3600		# was 20 hours
+    @ttl = 20 * $HOUR
     @waypoints = Hash.new
 
     # cache types for selected search
@@ -100,7 +103,7 @@ class SearchCache
   def txfilter=(cacheType)
     # may return nil if not found
     @txfilter = @cachetypetx[cacheType]
-    @txfilter = @txfilter + '&children=y' if (@txfilter and (@txfilter !~ /children=/))
+    @txfilter << '&children=y' if (@txfilter and (@txfilter !~ /children=/))
     debug "Setting txfilter to \"#{cacheType}\", now #{@txfilter.inspect}"
   end
 
@@ -109,6 +112,7 @@ class SearchCache
   end
 
   def setType(mode, key)
+    @search_url = nil
     @query_type = nil
     @query_arg = key
     supports_distance = false
@@ -144,23 +148,23 @@ class SearchCache
 
     when 'user'
       @query_type = 'ul'
-      @ttl = 20 * 3600
+      @ttl = 20 * $HOUR
       # mongo:
       @userquery = key
 
     when 'owner'
       @query_type = 'u'
-      @ttl = 1 * 24 * 3600
+      @ttl = 1 * $DAY
 
     when 'country'
       @query_type = 'country'
       @search_url = @@base_url + "?country_id=#{key}&as=1"
-      @ttl = 1 * 24 * 3600
+      @ttl = 1 * $DAY
 
     when 'state'
       @query_type = 'state'
       @search_url = @@base_url + "?state_id=#{key}"
-      @ttl = 1 * 24 * 3600
+      @ttl = 1 * $DAY
 
     when 'keyword'
       @query_type = 'key'
@@ -174,6 +178,12 @@ class SearchCache
       @query_type = 'guid'
       @query_arg = key.downcase
       @search_url = "https://www.geocaching.com/seek/cache_details.aspx?guid=#{key.downcase}"
+
+    when 'bookmark'
+      @query_type = 'bookmark'
+      @query_arg = key.downcase
+      @search_url = "https://www.geocaching.com/bookmarks/view.aspx?guid=#{key.downcase}"
+
     end
 
     if not @query_type
@@ -186,15 +196,15 @@ class SearchCache
     end
 
     if @txfilter
-        @search_url = @search_url + '&tx=' + @txfilter
+        @search_url << '&tx=' + @txfilter
     end
 
     if @notyetfound
-        @search_url = @search_url + '&f=1'
+        @search_url << '&f=1'
     end
 
     if supports_distance and @distance
-        @search_url = @search_url + '&dist=' + @distance.to_s
+        @search_url << '&dist=' + @distance.to_s
     end
 
     debug @search_url
@@ -261,7 +271,7 @@ class SearchCache
     debug3 "Getting results: #{@query_type} at #{@search_url}"
     if @query_type == 'wid'
       waypoint = getWidSearchResult(@search_url)
-      if ! waypoint
+      if not waypoint
         # no valid page found
         return {}
       end
@@ -276,7 +286,7 @@ class SearchCache
       return @waypoints
     elsif @query_type == 'guid'
       waypoint = getWidSearchResult(@search_url)
-      if ! waypoint
+      if not waypoint
         # no valid page found
         return {}
       end
@@ -295,7 +305,7 @@ class SearchCache
   end
 
   def getWidSearchResult(url)
-    data = getPage(url, {})
+    data, src = getPage(url, {})
     if not data
       displayError "No data to be analyzed! Check network connection!"
     end
@@ -327,7 +337,7 @@ class SearchCache
       # wherigo cartridge link
       # http://www.wherigo.com/cartridge/details.aspx?CGUID=...
       # http://www.wherigo.com/cartridge/download.aspx?CGUID=...
-      when /(www\.wherigo\.com\/cartridge\/\w+.aspx\?CGUID=([0-9a-f-]+))/
+      when /(www\.wherigo\.com\/cartridge\/\w+.aspx\?CGUID=([0-9a-f-]{36}))/
         debug "Wherigo cartridge at #{$1}"
         # do not overwrite with later ones
         if not cartridge
@@ -390,7 +400,7 @@ class SearchCache
       when /onclick=\"s2phone\(.*?(GC\w+).*?\);return/
         wid = $1
         debug "Found WID: #{wid} (s2phone)"
-       # premium-member only
+      # premium-member only
       when /WptTypeImage.*\/(wpttypes|play\/Content\/images\/cache-types)\/(\w+)\./
         ccode = $2
         # list covers only "standard" types! This may be incorrect
@@ -405,12 +415,12 @@ class SearchCache
         wid = $1
         debug "Found PMO WID: #{wid}"
       # <form ... action="../seek/cache_pmo.aspx?wp=GC4V7ZH&amp;title=froehliche-weihnachten&amp;guid=2718079c-9da2-4962-8618-37ca1820bde8" id="aspnetForm">
-      when /cache_pmo.aspx\?wp=(GC\w+).amp;(.*guid=([0-9a-f-]+))?/
+      when /cache_pmo.aspx\?wp=(GC\w+).amp;(.*guid=([0-9a-f-]{36}))?/
         wid = $1
         guid = $3
         debug "Found PMO WID: #{wid.inspect} GUID: #{guid.inspect}"
       # attention: the following also matches links in comments, avoid overwriting
-      when /cache_\w+.aspx\?wp=(GC\w+).amp;(.*guid=([0-9a-f-]+))?/
+      when /cache_\w+.aspx\?wp=(GC\w+).amp;(.*guid=([0-9a-f-]{36}))?/
         if not wid
           wid = $1
           guid = $3
@@ -466,7 +476,7 @@ class SearchCache
       cdays = daysAgo(ctime)
     end
     # one match is enough!
-    if data =~ /cdpf\.aspx\?guid=([\w-]+)/m
+    if data =~ /cdpf\.aspx\?guid=([0-9a-f-]{36})/m
       guid = $1
       debug "Found GUID: #{guid}"
     end
@@ -546,8 +556,8 @@ class SearchCache
 
     page_number, pages_total, parsed_total, post_vars, src = processPage({})
     progress = ProgressBar.new(1, pages_total, "Search results")
-    progress.updateText(page_number, "page #{page_number} (#{src.gsub(/(\w)\w*/){$1}})")
-    if not parsed_total or parsed_total == 0
+    progress.updateText(page_number, "page #{page_number} (#{src})")
+    if parsed_total.to_i <= 0
       displayMessage "No geocaches were found."
       return @waypoints
     end
@@ -575,7 +585,7 @@ class SearchCache
       last_page_number = page_number
       page_number, total_pages, total_waypoints, post_vars, src = processPage(post_vars)
       debug2 "processPage returns #{page_number}/#{total_pages}"
-      progress.updateText(page_number, "page #{page_number} (#{src.gsub(/(\w)\w*/){$1}})")
+      progress.updateText(page_number, "page #{page_number} (#{src})")
 
       if page_number == last_page_number
         displayError "Stuck on page number #{page_number} of #{total_pages}"
@@ -583,7 +593,7 @@ class SearchCache
         displayError "We were on page #{last_page_number}, but just read #{page_number}. Parsing error?"
       end
       # limit search page count
-      if ! ((@max_pages == 0) or (page_number < @max_pages))
+      if ((@max_pages != 0) and (page_number >= @max_pages))
         debug "Reached page count limit #{page_number}/#{@max_pages}"
         page_number = pages_total
       end
@@ -598,18 +608,16 @@ class SearchCache
       page.postVars = post_vars.dup
     end
 
-    if (page.fetch)
-      return page.data
+    if page.fetch
+      return [page.data, page.src]
     else
-      return nil
+      return [nil, nil]
     end
   end
 
   def processPage(post_vars)
-    data = getPage(@search_url, post_vars)
+    data, src = getPage(@search_url, post_vars)
     page_number, pages_total, parsed_total, post_vars = parseSearchData(data)
-    cache_check = ShadowFetch.new(@url)
-    src = cache_check.src
     return [page_number, pages_total, parsed_total, post_vars, src]
   end
 
@@ -707,10 +715,11 @@ class SearchCache
           waypoints_total = $1.to_i
           page_number = $2.to_i
           pages_total = $3.to_i
+          debug2 "Found summary line, total #{$1}, page #{$2} of #{$3}"
         end
         # href="javascript:__doPostBack('ctl00$ContentBody$pgrTop$ctl08','')"><b>Next &gt;</b></a></td>
-        if line =~ /doPostBack\(\'([\w\$]+)\',\'\'\)\"><b>[^>]+ \&gt;<\/b>/ #Next
-          debug2 "Found next target: #{$1}"
+        if line =~ /doPostBack\(\'([\w\$]+)\',\'\'\)\"><b>([^>]+) \&gt;<\/b>/ #Next
+          debug2 "Found next target: #{$1} #{$2.inspect}"
           post_vars['__EVENTTARGET'] = $1
         end
       # at least Dutch is different...
@@ -723,8 +732,15 @@ class SearchCache
       # GC change 2012-02-14
       # <table class="SearchResultsTable Table"> (search results) </table>
       when /<table class=\"SearchResultsTable/
+        debug2 "entering result table"
         inresultstable = true
+      when /<table class=\"Table NoBottomSpacing\">/
+        if @query_type == 'bookmark'
+          debug2 "entering bookmark table"
+          inresultstable = true
+        end
       when /<\/table>/
+        debug2 "leaving result/bookmark table"
         inresultstable = false
       end #case
 
@@ -733,6 +749,7 @@ class SearchCache
         next
       end
 
+     if @query_type != 'bookmark'
       # stuff strictly inside results table
       case line
       # new travelbug list 2010-12-22
@@ -790,11 +807,11 @@ class SearchCache
         dir = $1
         dist = $2.to_f
         unit = $3
-        if (unit =~ /km/)
-          dist = dist / $MILE2KM
-        elsif (unit =~ /ft/)
+        if unit =~ /km/
+          dist /= $MILE2KM
+        elsif unit =~ /ft/
           # 1 mile = 1760 yards = 5280 feet
-          dist = dist / 5280.0
+          dist /= 5280.0
         end
         cache['distance'] = dist
         cache['direction'] = dir
@@ -816,7 +833,7 @@ class SearchCache
       # <a href="/seek/cache_details.aspx?guid=ecfd0038-8e51-4ac8-a073-1aebe7c10cbc" class="lnk">
       # ...<img src="http://www.geocaching.com/images/wpttypes/sm/3.gif" alt="Multi-cache" title="Multi-cache" /></a>
       # ... <a href="/seek/cache_details.aspx?guid=ecfd0038-8e51-4ac8-a073-1aebe7c10cbc" class="lnk  Strike"><span>Besinnungsweg</span></a>
-      when /(<img.*?wpttypes\/(\w+)\.[^>]*alt=\"(.*?)\".*)?cache_details.aspx\?guid=([0-9a-f-]*)([^>]*)><span>\s*(.*?)\s*<\/span><\/a>/
+      when /(<img.*?wpttypes\/(\w+)\.[^>]*alt=\"(.*?)\".*)?cache_details.aspx\?guid=([0-9a-f-]{36})([^>]*)><span>\s*(.*?)\s*<\/span><\/a>/
         debug "found cd ccode=#{$2} type=#{$3} guid=#{$4} name=#{$6}"
         ccode = $2
         full_type = $3
@@ -834,7 +851,7 @@ class SearchCache
         end
         # there may be more than 1 match, don't overwrite
         if cache['fulltype']
-          debug "Not overwriting \"#{cache['fulltype']}\"(#{cache['type']} with \"#{full_type}\""
+          debug "Not overwriting \"#{cache['fulltype']}\" (#{cache['type']}) with \"#{full_type}\""
         else
           cache['fulltype'] = full_type
           cache['type'] = full_type.split(' ')[0].downcase.gsub(/\-/, '')
@@ -884,15 +901,15 @@ class SearchCache
         if strike =~ /class=\"[^\"]*Warning/
           cache['archived'] = true
           debug "#{name} appears to be archived"
-        else
-          cache['archived'] = false
+#        else
+#          cache['archived'] = false
         end
 
         if strike =~ /class=\"[^\"]*Strike/
           cache['disabled'] = true
           debug "#{name} appears to be disabled"
-        else
-          cache['disabled'] = false
+#        else
+#          cache['disabled'] = false
         end
 
         cache['name'] = name.gsub(/  */, ' ')
@@ -916,7 +933,7 @@ class SearchCache
         end
         # there may be more than 1 match, don't overwrite
         if cache['fulltype']
-          debug "Not overwriting \"#{cache['fulltype']}\"(#{cache['type']} with \"#{full_type}\""
+          debug "Not overwriting \"#{cache['fulltype']}\" (#{cache['type']}) with \"#{full_type}\""
         else
           cache['fulltype'] = full_type
           cache['type'] = full_type.split(' ')[0].downcase.gsub(/\-/, '')
@@ -966,15 +983,15 @@ class SearchCache
         if strike =~ /class=\"[^\"]*Warning/
           cache['archived'] = true
           debug "#{name} appears to be archived"
-        else
-          cache['archived'] = false
+#        else
+#          cache['archived'] = false
         end
 
         if strike =~ /class=\"[^\"]*Strike/
           cache['disabled'] = true
           debug "#{name} appears to be disabled"
-        else
-          cache['disabled'] = false
+#        else
+#          cache['disabled'] = false
         end
 
         cache['name'] = name.gsub(/  */, ' ')
@@ -1005,9 +1022,9 @@ class SearchCache
       #             |>$2|    |->$3 -------------------------------|
       when /^\s{28}((.*?), )?([A-Z][a-z]+\.?([ -]\(?[A-Za-z]+\)?)*)<\/span>\s?$/
         debug "Country/state found #{$2} #{$3}"
-        if ($3 != "Icons" && $3 != "Placed" && $3 != "Description" && $3 != "Last Found")
+        if ($3 != "Icons" and $3 != "Placed" and $3 != "Description" and $3 != "Last Found")
           # special case US states:
-          if (usstates[$3])
+          if usstates[$3]
             cache['country'] = 'United States'
             cache['state'] = $3
           else
@@ -1070,8 +1087,113 @@ class SearchCache
         end
         # clear cache even if there's no wid (yet)
         cache.clear
+        wid = nil
 
       end # end case
+     else # != 'bookmark'
+
+      case line
+      when /guid=([0-9a-f-]{36}).>(GC\w+)</
+        guid = $1
+        wid = $2
+        cache['guid'] = guid
+        cache['wid'] = wid
+        debug "found guid=#{guid} wid=#{wid}"
+
+      when /<img.*?wpttypes\/(sm\/)?(\w+)\.[^>]*alt=\"(.*?)\"/
+        debug "found gc ccode=#{$2} type=#{$3}"
+        ccode = $2
+        full_type = $3
+        if @cachetypenum[ccode]
+          full_type = @cachetypenum[ccode]
+        end
+        # there may be more than 1 match, don't overwrite
+        if cache['fulltype']
+          debug "Not overwriting \"#{cache['fulltype']}\" (#{cache['type']}) with \"#{full_type}\""
+        else
+          cache['fulltype'] = full_type
+          cache['type'] = full_type.split(' ')[0].downcase.gsub(/\-/, '')
+          # special cases
+          case full_type
+          when /Cache In Trash Out/
+            cache['type'] = 'cito'
+          when /Lost and Found Celebration/
+            cache['type'] = 'lfceleb'
+          when /Lost and Found Event/
+            cache['type'] = 'lost+found'
+          when /Project APE Cache/
+            cache['type'] = 'ape'
+          when /Groundspeak HQ/
+            cache['type'] = 'gshq'
+          when /Geocaching HQ/
+            cache['type'] = 'gshq'
+          when /Locationless/
+            cache['type'] = 'reverse'
+          when /Block Party/
+            cache['type'] = 'block'
+          when /Exhibit/
+            cache['type'] = 'exhibit'
+          # planned transition
+          when /Mystery/
+            cache['fulltype'] = 'Unknown Cache'
+            cache['type'] = 'unknown'
+          # 2014-08-26
+          when /Traditional/
+            cache['fulltype'] = 'Traditional Cache'
+            cache['type'] = 'traditional'
+          when /Earth/
+            cache['fulltype'] = 'Earthcache'
+            cache['type'] = 'earthcache'
+          end
+          if full_type =~ /Event/
+            debug "Setting event flag for #{full_type}"
+            cache['event'] = true
+          end
+          debug "short type=#{cache['type']} for #{full_type}"
+        end
+
+      when /<span class=\"(.*?)\">(.*?)<\/span>/
+        # <span class="OldWarning Strike">Lars vom Mars</span>
+        # <span class="Strike">Rund um den See, # 04</span>
+        strike = $1
+        name = $2
+        cache['name'] = name
+        debug "name #{name.inspect} with flags"
+        if strike =~ /Warning/
+          cache['archived'] = true
+          debug "#{name} appears to be archived"
+#        else
+#          cache['archived'] = false
+        end
+        if strike =~ /Strike/
+          cache['disabled'] = true
+          debug "#{name} appears to be disabled"
+#        else
+#          cache['disabled'] = false
+        end
+
+      when /^\s+(\w+)\s*$/
+        name = $1
+        cache['name'] = name
+        debug "name #{name.inspect}"
+
+      when /^\s+<\/tr>/
+        debug "--- end of row ---"
+        if wid and not @waypoints.has_key?(wid)
+          debug2 "- closing #{wid} record -"
+          parsed_total += 1
+
+          @waypoints[wid] = cache.dup
+          @waypoints[wid]['visitors'] = []
+          # cache counter (1..n) - need that to reconstruct search order
+          @waypoints[wid]['index'] = @waypoints.length
+        end
+        cache.clear
+        wid = nil
+
+      end # end case
+     end # 'bookmark'
+
     } # end loop
     rescue => error
       displayWarning "Error in parseSearchData():data.split"

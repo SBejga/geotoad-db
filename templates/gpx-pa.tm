@@ -5,12 +5,11 @@ template = {
   # Originally contributed by Tris Sethur, Sep 2011
   'gpx-pa' => {
     'ext'  => 'gpx',
-    'mime' => 'text/ascii',
     'desc' => 'GPX for PathAway',
     'templatePre'  =>
       "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
       "<gpx" +
-       " version=\"1.0\" creator=\"GeoToad\"" +
+       " version=\"1.0\" creator=\"GeoToad <%outEntity.version%>\"" +
        " xsi:schemaLocation=\"" +
          "http://www.topografix.com/GPX/1/0 http://www.topografix.com/GPX/1/0/gpx.xsd" +
         " http://www.groundspeak.com/cache/1/0/1 http://www.groundspeak.com/cache/1/0/1/cache.xsd" +
@@ -20,10 +19,9 @@ template = {
        " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"" +
        " xmlns:groundspeak=\"http://www.groundspeak.com/cache/1/0/1\"" +
       ">\n" +
-      "<name>" + Time.new.gmtime.strftime("%Y%m%dT%H%M%S") + "</name>\n" +
+      "<name>" + Time.new.localtime.strftime("%Y%m%dT%H%M%S") + "</name>\n" +
       "<desc><%outEntity.title%></desc>\n" +
-      "<author>GeoToad <%outEntity.version%></author>\n" +
-      "<time>" + Time.new.gmtime.strftime("%Y-%m-%dT%H:%M:%S")  + ".000Z</time>\n",
+      "<time>" + Time.new.gmtime.strftime("%Y-%m-%dT%H:%M:%S.000Z")  + "</time>\n",
     'templateWP'   =>
       "<wpt lat=\"<%out.latdatapad6%>\" lon=\"<%out.londatapad6%>\">\n" +
       "  <name>" + '<![CDATA[' + "<%outEntity.id%>" + ']]>' + "</name>\n" +

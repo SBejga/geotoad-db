@@ -7,6 +7,8 @@
 *-v
 .idea/
 
+/contrib/CA_Bundle/cacert.pem
+
 # Mac
 .DS_Store
 

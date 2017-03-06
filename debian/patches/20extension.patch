@@ -18,7 +18,7 @@
      puts ""
      puts " -u <username>          Geocaching.com username, required for coordinates"
      puts " -p <password>          Geocaching.com password, required for coordinates"
-@@ -332,12 +332,12 @@
+@@ -333,12 +333,12 @@
      puts " (+) requires gpsbabel  (=) requires cmconvert  (%) requires iconv in PATH"
      puts ""
      puts "::: EXAMPLES:"

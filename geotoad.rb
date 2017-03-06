@@ -4,10 +4,11 @@
 # This is the main geotoad binary.
 #
 
+require 'fileutils'
 require 'pathname'
 $BASEDIR = File.dirname(File.realpath(__FILE__))
 $LOAD_PATH << $BASEDIR
-$LOAD_PATH << File.join($BASEDIR, 'lib')
+#$LOAD_PATH << File.join($BASEDIR, 'lib')
 
 Encoding.default_external = Encoding::UTF_8
 
@@ -17,6 +18,10 @@ $delimiter = '|'
 $my_lat = nil
 $my_lon = nil
 
+require 'find' # for cleanup
+require 'zlib'
+require 'cgi'
+require 'net/https' # for openssl
 # toss in our own libraries.
 require 'interface/progressbar'
 require 'lib/common'
@@ -29,12 +34,6 @@ require 'lib/output'
 require 'lib/details'
 require 'lib/auth'
 require 'lib/version'
-require 'getoptlong'
-require 'fileutils'
-require 'find' # for cleanup
-require 'zlib'
-require 'cgi'
-require 'net/https' # for openssl
 
 #mongodb extension
 require 'mongodb'
@@ -47,27 +46,31 @@ class GeoToad
   include Common
   include Messages
   include Auth
+
   $VERSION = GTVersion.version
+
   # with the new progressive slowdown, start with 1 second
   $SLEEP = 1.0
 
   # *if* cache D/T/S extraction works, early filtering is possible
   $DTSFILTER = true
 
-  # time to use for "unknown" creation dates
-  $ZEROTIME = 946728000 # 2000-01-01T13:00:00Z
+  # time to use for "unknown" dates: noon UTC Jan 1, 2000 (second 946728000)
+  $ZEROTIME = Time.new(2000, 1, 1, 12, 00, 00, 0).to_i
 
   # conversion miles to kilometres
   $MILE2KM = 1.609344
 
+  # time conversions
+  $DAY  = 24 * 60 * 60
+  $HOUR = 60 * 60
+
   def initialize
+    # some actions postponed to "populate"
     $debugMode    = 0
-#    output        = Output.new
-#    $validFormats = output.formatList.sort
     @uin          = Input.new
     $CACHE_DIR    = findCacheDir()
     @configDir    = findConfigDir
-#    $mapping      = loadMapping()
     $membership   = nil # unknown before searching
   end
 
@@ -88,11 +91,11 @@ class GeoToad
 
   def getoptions
     if ARGV[0]
-      # command line arguments
+      # there are command line arguments
       @option = @uin.getopt
       $mode = 'CLI'
     else
-      # Then go into interactive.
+      # go into interactive.
       print "** Press Enter to start the Text User Interface: "
       $stdin.gets
       @option = @uin.interactive
@@ -105,8 +108,8 @@ class GeoToad
     end
 
     # enable synchronous output if selected by user
-    if (@option['unbufferedOutput'])
-      if (! $stdout.sync)
+    if @option['unbufferedOutput']
+      if not $stdout.sync
         $stdout.flush
         $stdout.sync = true
         puts "(***) Switched to unbuffered output"
@@ -141,29 +144,33 @@ class GeoToad
       exit
     end
 
-    if ! @option['clearCache'] && ! @option['myLogs'] && ! @option['myTrackables'] && ! @queryArg
+    if not @option['clearCache'] and not @option['myLogs'] and not @option['myTrackables'] and not @queryArg
       displayError "You forgot to specify a #{@queryType} search argument"
       @uin.usage
       exit
     end
 
-    if (! @option['user']) || (! @option['password'])
+    if (not @option['user']) or (not @option['password'])
       debug "No user/password option given, loading from config."
       (@option['user'], @option['password']) = @uin.loadUserAndPasswordFromConfig()
-      if (! @option['user']) || (! @option['password'])
+      if (not @option['user']) or (not @option['password'])
         displayError "You must specify a username and password!"
         exit
       end
     end
 
     # switch -X to disable early DTS filtering
-    if (@option['disableEarlyFilter'])
+    if @option['disableEarlyFilter']
       $DTSFILTER = false
     end
 
     @preserveCache     = @option['preserveCache']
+    @getLogbook        = @option['getLogbook']
+    @imageLinks        = @option['imageLinks']
 
     @formatTypes       = @option['format'] || 'gpx'
+    # experimental: runtime output filtering
+    @conditionWP       = @option['conditionWP']
     # there is no "usemetric" cmdline option but the TUI may set it
     @useMetric         = @option['usemetric']
     # distanceMax from command line can contain the unit
@@ -211,14 +218,14 @@ class GeoToad
     wikiurl = "https://github.com/steve8x8/geotoad/wiki/CurrentVersion"
 
     version = ShadowFetch.new(checkurl)
-    version.localExpiry = 1 * 86400	# 1 day
+    version.localExpiry = 1 * $DAY
     version.maxFailures = 0
     version.fetch
 
     # version=a.bb.cc[*] in wiki page (* marks "supersedes all")
     if version.data =~ /version=(\d\.\d+[\.\d]+)(\*)?/
       latestVersion = $1
-      obsoleteOlder = ! $2.to_s.empty?
+      obsoleteOlder = (not $2.to_s.empty?)
 
       if comparableVersion(latestVersion) > comparableVersion($VERSION)
         displayBar
@@ -259,14 +266,16 @@ class GeoToad
     debug "findRemoveFiles() age=#{age}, pattern=#{pattern}, writable=#{writable.inspect}"
     filelist = Array.new
     begin # catch filesystem problems
-      Find.find(where){ |file|
-        # never touch directories
-        next if not File.file?(file)
-        next if (age * 86400) > (Time.now - File.mtime(file)).to_i
-        next if not regexp.match(File.basename(file))
-        next if writable and not File.writable?(file)
-        filelist.push file
-      }
+      if File.exists?(where) and File.stat(where).directory?
+        Find.find(where){ |file|
+          # never touch directories
+          next if not File.file?(file)
+          next if (age * 86400) > (Time.now - File.mtime(file)).to_i
+          next if not regexp.match(File.basename(file))
+          next if writable and not File.writable?(file)
+          filelist.push file
+        }
+      end
     rescue => error
       displayWarning "Cannot parse #{where}: #{error}"
       return
@@ -290,8 +299,6 @@ class GeoToad
 
     displayInfo "Clearing account data older than 7 days"
     findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "account"), 7)
-    # obsolete again 2014-10-28
-    #findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "myaccount"), 7)
 
     displayInfo "Clearing login data older than 7 days"
     findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "login"), 7)
@@ -301,11 +308,23 @@ class GeoToad
     #displayInfo "Clearing cache descriptions older than 31 days"
     #findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "seek"), 31, "^cdpf\\.aspx.*", true)
 
+    displayInfo "Clearing bookmark list query data older than 3 days"
+    findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "bookmarks"), 3, "^view\\.aspx.*", true)
+
     displayInfo "Clearing cache details older than 3 days"
     findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "seek"), 3, "^cache_details\\.aspx.*", true)
 
     displayInfo "Clearing log submission pages older than 3 days"
     findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "seek"), 3, "^log\\.aspx.*", true)
+
+    displayInfo "Clearing logbook query pages older than 3 days"
+    findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "seek"), 3, "^cache_logbook\\.aspx.*", true)
+
+    displayInfo "Clearing logbook json files older than 7 days"
+    findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "seek"), 7, "^cache_logbook\\.json.*", true)
+
+    displayInfo "Clearing gallery xml files older than 31 days"
+    findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "datastore"), 7, "^rss_galleryimages\\.ashx.*", true)
 
     displayInfo "Clearing lat/lon query data older than 3 days"
     findRemoveFiles(File.join($CACHE_DIR, "www.geocaching.com", "seek"), 3, "^nearest\\.aspx.*_lat_.*_lng_.*", true)
@@ -333,15 +352,11 @@ class GeoToad
     displayMessage "Logging in as #{@option['user']}"
     @cookie = login(@option['user'], @option['password'])
     debug "Login returned cookie #{hideCookie(@cookie).inspect}"
-    if (@cookie) && (@cookie =~ /gspkauth=/) && (@cookie =~ /(ASP.NET_SessionId=\w+)/)
+    if @cookie and (@cookie =~ /gspkauth=/) and (@cookie =~ /(ASP.NET_SessionId=\w+)/)
       displayMessage "Login successful"
     else
       displayWarning "Login failed!"
       displayWarning "Check network connection, username and password!"
-      #displayWarning "Note: Subsequent operations may fail. You've been warned."
-      #displayInfo    "You have 60 seconds to safely interrupt here."
-      #sleep 60
-      #displayWarning "Okay, as you wish. Don't complain if something breaks!"
       displayError   "Stopping here, for your own safety."
     end
     displayMessage "Querying user preferences"
@@ -385,7 +400,6 @@ class GeoToad
     end
 
     displayBar
-    #puts ""
     @queryArg.to_s.split($delimiters).each{ |queryArg0|
       # strip whitespace at beginning and end
       queryArg = queryArg0.gsub(/^\s+/, '').gsub(/\s+$/, '')
@@ -435,7 +449,7 @@ class GeoToad
 
       # this is kind of late, but we did our best 
       # we had to set txfilter and notyetfound before because setType creates the search URL
-      if (! search.setType(@queryType, queryArg))
+      if not search.setType(@queryType, queryArg)
         displayWarning "Search \"#{@queryType}\" for \"#{queryArg}\" unknown."
         displayWarning "Check for special characters or try a \"coord\" search instead."
         sleep 10
@@ -462,14 +476,13 @@ class GeoToad
     waypointsExtracted = 0
     @combinedWaypoints.each_key{ |wp|
       debug2 "pre-filter: #{wp}"
-      waypointsExtracted = waypointsExtracted + 1
+      waypointsExtracted += 1
     }
 
     debug "waypoints extracted: #{waypointsExtracted}, combined: #{@combinedWaypoints.length}"
     if (waypointsExtracted < @combinedWaypoints.length)
       displayWarning "Downloaded #{@combinedWaypoints.length} waypoints, but only #{waypointsExtracted} parsed!"
     end
-    #puts ""
     return waypointsExtracted
   end
 
@@ -488,14 +501,14 @@ class GeoToad
     # with our discovery.
 
     userLookups = Array.new
-    if @option['userExclude'] and not @option['userExclude'].empty?
+    if not @option['userExclude'].to_s.empty?
       @appliedFilters['-E'] = { 'f' => "#{@option['userExclude']}", 't' => "not done by" }
       userLookups = @option['userExclude'].split($delimiters)
     end
 
-    if @option['userInclude'] and not @option['userInclude'].empty?
+    if not @option['userInclude'].to_s.empty?
       @appliedFilters['-e'] = { 'f' => "#{@option['userInclude']}", 't' => "done by" }
-      userLookups = userLookups + @option['userInclude'].split($delimiters)
+      userLookups << @option['userInclude'].split($delimiters)
     end
 
     userLookups.each{ |user|
@@ -503,7 +516,6 @@ class GeoToad
       if (user =~ /(.*)=(.*)/)
         username = $1
         filename = $2
-        #puts ""
         displayMessage "Read #{filename} for #{username}"
         counter = 0
         # read file (1st column)
@@ -513,7 +525,7 @@ class GeoToad
             wid = $1
             debug2 "Add #{wid} for #{username}"
             @filtered.addVisitor(wid, username)
-            counter = counter + 1
+            counter += 1
           end
           }
           displayInfo "Total of #{counter} WIDs read"
@@ -543,7 +555,6 @@ class GeoToad
   # This step filters out all the geocaches by information
   # found from the searches.
   def preFetchFilter
-    #puts ""
     @filtered = Filter.new(@combinedWaypoints)
     debug "Filter running cycle 1, #{caches(@filtered.totalWaypoints)} left."
 
@@ -661,13 +672,13 @@ class GeoToad
     showRemoved(excludedFilterTotal, "Trackable")
 
     beforeFilterTotal = @filtered.totalWaypoints
-    if (@option['ownerExclude'])
+    if @option['ownerExclude']
       @appliedFilters['-I'] = { 'f' => "#{@option['ownerExclude']}", 't' => "not owned by" }
       @option['ownerExclude'].split($delimiters).each{ |owner|
         @filtered.ownerExclude(owner)
       }
     end
-    if (@option['ownerInclude'])
+    if @option['ownerInclude']
       @appliedFilters['-i'] = { 'f' => "#{@option['ownerInclude']}", 't' => "owned by" }
       @option['ownerInclude'].split($delimiters).each{ |owner|
         @filtered.ownerInclude(owner)
@@ -677,13 +688,13 @@ class GeoToad
     showRemoved(excludedFilterTotal, "Owner")
 
     beforeFilterTotal = @filtered.totalWaypoints
-    if (@option['userExclude'])
+    if @option['userExclude']
       @appliedFilters['-E'] = { 'f' => "#{@option['userExclude']}", 't' => "not done by" }
       @option['userExclude'].split($delimiters).each{ |user|
         @filtered.userExclude(user)
       }
     end
-    if (@option['userInclude'])
+    if @option['userInclude']
       @appliedFilters['-e'] = { 'f' => "#{@option['userInclude']}", 't' => "done by" }
       @option['userInclude'].split($delimiters).each{ |user|
         @filtered.userInclude(user)
@@ -711,7 +722,6 @@ class GeoToad
   end
 
   def fetchGeocaches
-    #puts ""
     if $membership
       displayMessage "Fetching geocache pages as \"#{$membership}\""
     else
@@ -721,29 +731,27 @@ class GeoToad
     progress = ProgressBar.new(0, @filtered.totalWaypoints, "")
     @detail = CacheDetails.new(wpFiltered)
     @detail.preserve = @preserveCache
+    @detail.getlogbk = @getLogbook
+    @detail.getimage = @imageLinks
     token = 0
 
     # geotoaddb: mongo
     geotoader = Geotoaderdb.new()
 
     wpFiltered.each_key{ |wid|
-      token = token + 1
-      detailURL = @detail.fullURL(wid)
-      page = ShadowFetch.new(detailURL)
-      status = @detail.fetch(wid)
+      token += 1
+      status, src = @detail.fetchWid(wid)
       message = nil
 
       if status == 'login-required'
-        displayMessage "Cookie does not appear to be valid, logging in as #{@option['user']}"
-        @detail.cookie = login(@option['user'], @option['password'])
-        status = @detail.fetch(wid)
+        displayError   "Cookie suddenly does not appear to be valid anymore. No way to handle this."
       end
 
       message = ""
       warning = wpFiltered[wid]['warning']
       keepdata = true
       # status is hash; false/nil/empty or string if problem
-      if ! status #status.to_s.empty?
+      if not status
         message << "[W:\"#{warning}\"]"
         keepdata = false
       elsif status.class != Hash
@@ -765,16 +773,16 @@ class GeoToad
           keepdata = false
         end
       else
-        if (wpFiltered[wid]['membersonly'])
+        if wpFiltered[wid]['membersonly']
           message << "[PMO]"
-        elsif (warning)
+        elsif warning
           message << "[W:\"#{warning}\"]"
         end
       end
       # archived/disabled
-      if (wpFiltered[wid]['archived'])
+      if wpFiltered[wid]['archived']
         message << "[%]"
-      elsif (wpFiltered[wid]['disabled'])
+      elsif wpFiltered[wid]['disabled']
         message << "[?]"
       end
       name = wpFiltered[wid]['name']
@@ -786,9 +794,9 @@ class GeoToad
       end
       name = temp
       message << (keepdata ? "" : "(del)")
-      progress.updateText(token, "[#{wid}]".ljust(9)+" \"#{name}\" (#{page.src.gsub(/(\w)\w*/){$1}}) #{message}")
+      progress.updateText(token, "[#{wid}]".ljust(9)+" \"#{name}\" (#{src}) #{message}")
 
-      if ! keepdata
+      if not keepdata
         debug "Page for #{wid} \"#{wpFiltered[wid]['name']}\" failed to be parsed, invalidating cache."
         wpFiltered.delete(wid)
         page.invalidate()
@@ -803,7 +811,6 @@ class GeoToad
   # In this stage, we actually have to download all the information on the caches in order to decide
   # whether or not they are keepers.
   def postFetchFilter
-    #puts ""
     @filtered= Filter.new(@detail.waypoints)
 
     # caches with warnings we choose not to include.
@@ -849,8 +856,6 @@ class GeoToad
     excludedFilterTotal = beforeFilterTotal - @filtered.totalWaypoints
     showRemoved(excludedFilterTotal, "Keyword")
 
-    ##if not $DTSFILTER
-    #-------------------
     beforeFilterTotal = @filtered.totalWaypoints
     if @option['difficultyMin']
       @appliedFilters['-d'] = { 'f' => "#{@option['difficultyMin']}", 't' => "difficulty min" }
@@ -878,8 +883,6 @@ class GeoToad
     end
     excludedFilterTotal = beforeFilterTotal - @filtered.totalWaypoints
     showRemoved(excludedFilterTotal, "D/T/Size")
-    #-------------------
-    ##end # not $DTSFILTER
 
     beforeFilterTotal = @filtered.totalWaypoints
     if @option['favFactorMin']
@@ -896,13 +899,13 @@ class GeoToad
     # We filter for users again. While this may be a bit obsessive, this is in case
     # our local cache is not valid.
     beforeFilterTotal = @filtered.totalWaypoints
-    if (@option['userExclude'])
+    if @option['userExclude']
       @appliedFilters['-E'] = { 'f' => "#{@option['userExclude']}", 't' => "not done by" }
       @option['userExclude'].split($delimiters).each{ |user|
         @filtered.userExclude(user)
       }
     end
-    if (@option['userInclude'])
+    if @option['userInclude']
       @appliedFilters['-e'] = { 'f' => "#{@option['userInclude']}", 't' => "done by" }
       @option['userInclude'].split($delimiters).each{ |user|
         @filtered.userInclude(user)
@@ -912,13 +915,13 @@ class GeoToad
     showRemoved(excludedFilterTotal, "User")
 
     beforeFilterTotal = @filtered.totalWaypoints
-    if (@option['attributeExclude'])
+    if @option['attributeExclude']
       @appliedFilters['-A'] = { 'f' => "#{@option['attributeExclude']}", 't' => "attr no" }
       @option['attributeExclude'].split($delimiters).each{ |attribute|
         @filtered.attributeExclude(attribute)
       }
     end
-    if (@option['attributeInclude'])
+    if @option['attributeInclude']
       @appliedFilters['-a'] = { 'f' => "#{@option['attributeExclude']}", 't' => "attr yes" }
       @option['attributeInclude'].split($delimiters).each{ |attribute|
         @filtered.attributeInclude(attribute)
@@ -928,19 +931,19 @@ class GeoToad
     showRemoved(excludedFilterTotal, "Attribute")
 
     beforeFilterTotal = @filtered.totalWaypoints
-    if (@option['minLongitude'])
+    if @option['minLongitude']
       @appliedFilters['--minLon'] = { 'f' => "#{@option['minLongitude']}", 't' => "West" }
       @filtered.longMin(@option['minLongitude'])
     end
-    if (@option['maxLongitude'])
+    if @option['maxLongitude']
       @appliedFilters['--maxLon'] = { 'f' => "#{@option['maxLongitude']}", 't' => "East" }
       @filtered.longMax(@option['maxLongitude'])
     end
-    if (@option['minLatitude'])
+    if @option['minLatitude']
       @appliedFilters['--minLat'] = { 'f' => "#{@option['minLatitude']}", 't' => "South" }
       @filtered.latMin(@option['minLatitude'])
     end
-    if (@option['maxLatitude'])
+    if @option['maxLatitude']
       @appliedFilters['--maxLat'] = { 'f' => "#{@option['maxLatitude']}", 't' => "North" }
       @filtered.latMax(@option['maxLatitude'])
     end
@@ -955,7 +958,6 @@ class GeoToad
 
   ## save the file #############################################
   def saveFile
-    #puts ""
     formatTypeCounter = 0
 
     # @appliedFilters: sort by option letter, ignore case
@@ -978,7 +980,7 @@ class GeoToad
     # 'output' may be a directory, with or without trailing slash (should exist)
     # if there's nil or empty (no path at all), use current working directory
     # or the filename for the first output file, explicitly given
-    if ! @option['output'].to_s.empty?
+    if not @option['output'].to_s.empty?
       filename = @option['output'].dup
     else
       filename = Dir.pwd
@@ -1001,11 +1003,10 @@ class GeoToad
       outputFileBase.gsub!(/_+/, '_')
       # shorten at a somewhat randomly chosen place to fit in filesystem
       if outputFileBase.length > 220
-        outputFileBase = outputFileBase[0..215] + "_etc"
+        outputFileBase[216..-1] = "_etc"
       end
     else
       outputFileBase = File.basename(filename)
-      # 
       outputDir = File.dirname(filename + 'x')
     end
     displayInfo message
@@ -1014,18 +1015,19 @@ class GeoToad
     @formatTypes.split($delimiters).each{ |formatType0|
       # does the formatType string contain a "="?
       formatType = formatType0.split(/=/)[0]
-      if ! $validFormats.include?(formatType)
+      if not $validFormats.include?(formatType)
         displayWarning "#{formatType} is not a valid supported format - skipping."
         next
       end
       output = Output.new
+      output.conditionWP = @conditionWP
       displayInfo "Format:   #{output.formatDesc(formatType)} (#{formatType})"
       output.input(@filtered.waypoints)
       output.formatType = formatType
-      if (@option['waypointLength'])
+      if @option['waypointLength']
         output.waypointLength=@option['waypointLength'].to_i
       end
-      if (@option['logCount'])
+      if @option['logCount']
         output.commentLimit=@option['logCount'].to_i
       end
       # keep filename if first run and not automatic
@@ -1034,13 +1036,13 @@ class GeoToad
         outputFileBase.gsub!(/\.[^\.]*$/, '')
       end
       # append suffix if automatic or subsequent runs
-      if (not @option['output']) || (formatTypeCounter > 0)
+      if (not @option['output']) or (formatTypeCounter > 0)
         outputFileExt = output.formatExtension(formatType)
         # override default extension?
         if formatType0 =~ /=/
           outputFileExt = formatType0.split(/=/)[1]
         end
-        outputFileBase = outputFileBase + "." + outputFileExt
+        outputFileBase << "." + outputFileExt
       end
       outputFile = File.join(outputDir, outputFileBase)
       # Lets not mix and match DOS and UNIX /'s, we'll just make everyone like us!
@@ -1048,7 +1050,7 @@ class GeoToad
       displayInfo "Filename: #{outputFile}"
 
       # append time to our title
-      queryTitle = @queryTitle + " (" + Time.now.strftime("%d%b%y %H:%M") + ")"
+      queryTitle = @queryTitle + " (" + Time.now.localtime.strftime("%d%b%y %H:%M") + ")"
 
       # and do the dirty.
       output.prepare(queryTitle, @option['user'])
@@ -1057,7 +1059,6 @@ class GeoToad
       else
         displayWarning "NOT saved #{outputFile}!"
       end
-      #puts ""
 
       formatTypeCounter += 1
     } # end format loop
@@ -1088,7 +1089,6 @@ $SSLVERIFYMODE = OpenSSL::SSL::VERIFY_PEER
 # better use RbConfig::CONFIG['host_os']?
 if ENV['SSL_CERT_FILE'] and File.readable?(ENV['SSL_CERT_FILE'])
   displayInfo "HTTPS will use SSL cert file #{ENV['SSL_CERT_FILE']}"
-  #$SSLVERIFYMODE = OpenSSL::SSL::VERIFY_PEER
 elsif RUBY_PLATFORM.downcase =~ /djgpp|(cyg|ms|bcc)win|mingw|wince|emx/
   displayWarning "HTTPS will not verify peer identity!"
   $SSLVERIFYMODE = OpenSSL::SSL::VERIFY_NONE
@@ -1141,14 +1141,14 @@ while true
 
     displayBar
 
-    loopcount = loopcount + 1
+    loopcount += 1
   end
 
   count = 0
-  if options['queryArg'] || options['myLogs'] || options['myTrackables']
+  if options['queryArg'] or options['myLogs'] or options['myTrackables']
     count = cli.downloadGeocacheList()
   end
-  if count < 1
+  if count <= 0
     displayWarning "No valid query or no caches found in search, exiting early."
   else
     displayMessage "Your \"#{options['queryType']}\" query \"#{options['queryArg']}\" returned #{cli.caches(count)}."
