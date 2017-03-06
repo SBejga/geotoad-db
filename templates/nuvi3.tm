@@ -1,9 +1,8 @@
 template = {
 
-  # Templates for Garmin nuvi road navigation devices. Use 'gpx-wpts' to add waypoints.
+  # Templates for Garmin nuvi 3xx road navigation devices which lack some features.
   #
   # Thanks to Kevin Bulgrien and the author(s) of the GPX_by_Cache_Type.gsk GSAK macro.
-  # *Tested with Garmin nuvi 255T which doesn't allow multiple phone entries.
   # Further improved following
   #  http://home.comcast.net/~ghayman3/garmin.gps/pagepoi.05.htm
   #  http://www.gpsbabel.org/htmldoc-development/fmt_garmin_gpi.html
@@ -14,11 +13,10 @@ template = {
   # Still missing: radial alerts (need TourGuide features? not in gpsbabel)
   # 2017: GPX/1/1 for extensions; remove some elements to make "SAXCount -v=always -n -s -f $file" happy
 
-  'gpx-nuvi' => {
+  'gpx-nuvi3' => {
     'ext'  => 'ngpx',
-    'desc' => 'GPX for Nuvi, without AddWpts',
+    'desc' => 'GPX for Nuvi 3xx, without AddWpts',
     'templatePre'  =>
-# encoding should be 'Windows-1252' (if we find out how to write this)
       "<?xml version=\'1.0\' encoding=\'UTF-8\' standalone=\'yes\' ?>\n" +
       "<gpx" +
        " version=\"1.1\" creator=\"GeoToad <%outEntity.version%>\"" +
@@ -36,39 +34,21 @@ template = {
       "  <desc><%outEntity.title%></desc>\n" +
       "  <time>" + Time.new.gmtime.strftime("%Y-%m-%dT%H:%M:%SZ")  + "</time>\n" +
       "</metadata>\n",
-# *Unicode characters (degree symbol, umlauts, etc.) will be shown as 3-character garbage
     'templateWP'   =>
       "<wpt lat=\"<%out.latdatapad6%>\" lon=\"<%out.londatapad6%>\">\n" +
       "  <time><%out.ctime%></time>\n" +
-# *title line, 1st line in POI list, max 24 chars shown
       "  <name><%outEntity.wid%>:<%out.nuvi%></name>\n" +
       "  <cmt></cmt>\n" +
-# *last line in display if cmt is empty (UTF-8 works only here! why?)
-      "  <desc><%wpEntity.name%><%out.warnArchiv%><%out.warnAvail%> by <%wpEntity.creator%>," +
-        " <%wp.fulltype%> (<%wp.size%>/<%wp.difficulty%>/<%wp.terrain%>)</desc>\n" +
       "  <sym>Geocache</sym>\n" +
       "  <extensions>\n" +
       "    <gpxx:WaypointExtension>\n" +
-# do NOT set proximity here as it cannot be overwritten by POIloader/gpsbabel!
-#      "      <gpxx:Proximity>250</gpxx:Proximity>\n" +
       "      <gpxx:DisplayMode>SymbolAndName</gpxx:DisplayMode>\n" +
-# gpsbabel doesn't know (but complains) about categories
-#      "      <gpxx:Categories>\n" +
-#      "        <gpxx:Category><%wp.fulltype%></gpxx:Category>\n" +
-#      "      </gpxx:Categories>\n" +
-      "      <gpxx:Address>\n" +
-# *2nd line in POI list, max 24 chars shown
-# *1st description line
-      "        <gpxx:StreetAddress><%wpEntity.name%></gpxx:StreetAddress>\n" +
-# *2nd description line "PostalCode City State" - localization dependent?
-      "        <gpxx:City><%wp.fulltype%> - <%out.csize%> -</gpxx:City>\n" +
-      "        <gpxx:State>D <%wp.difficulty%> - T <%wp.terrain%></gpxx:State>\n" +
-      "        <gpxx:PostalCode>by <%wpEntity.creator%> (<%out.cdate%>) -</gpxx:PostalCode>\n" +
-      "      </gpxx:Address>\n" +
-# nuvi 255 only accepts a single phone number, doesn't show the category
+      "      <gpxx:PhoneNumber Category=\"Email\">\n" +
+        "<%wpEntity.name%><%out.warnArchiv%><%out.warnAvail%> by <%wpEntity.creator%>, " +
+        "<%wp.fulltype%> (<%wp.size%>/<%wp.difficulty%>/<%wp.terrain%>)" +
+      "    </gpxx:PhoneNumber>\n" +
+# need feedback: does this work at all?
       "      <gpxx:PhoneNumber Category=\"Details\">\n" +
-# there are rumours that nuvis accept <b>...</b> <u>...</u>? (escape properly!)
-# does this add a line feed?
         "...\n" +
         "**Loca:  <%wp.latwritten%> / <%wp.lonwritten%>\n" +
         "**Last:  <%wp.last_find_type%>, <%wp.last_find_days%> days ago\n" +
@@ -88,12 +68,11 @@ template = {
       "</gpx>\n"
   },
 
-# *nüvi 255 doesn't like UTF-8, best to trim everything down to ASCII. Avoid <>!
-  'poi-nuvi' => {
+  'poi-nuvi3' => {
     'ext'         => 'gpi',
     'desc'        => 'POI for Nuvi, pure ASCII',
     'required'    => 'gpsbabel:iconv',
-    'filter_src'  => 'gpx-nuvi',
+    'filter_src'  => 'gpx-nuvi3',
     #use the following if you prefer UTF-8
     #'filter_exec' => 'gpsbabel -i gpx -o garmin_gpi,category="Geocaches",bitmap=STYLEFILE,alerts=1,unique=0,proximity=250m,sleep=2 -f INFILE -F OUTFILE'
     'filter_exec' => 'cat INFILE | tr \'«‹›»\' \'*\' | iconv -f UTF8 -t ASCII//TRANSLIT -c | ' +

@@ -7,22 +7,10 @@ class ProgressBar
     display
   end
 
-  def update(value)
-    @value = value
-  end
-
-  def setName(name)
-    @name = name
-  end
-
   def updateText(value, valueText)
     @value = value
     @valueText = valueText
     display
-  end
-
-  def setMax(value)
-    @max = max
   end
 
   def display
@@ -33,9 +21,7 @@ class ProgressBar
     end
 
     # if the value is 0 or less, don't bother to print up a bar.
-    if not @value or @value < 1
-      return
-    end
+    return if @value.to_i <= 0
 
     # adjust the definition of metercols and meterchar to actual needs
     # number of columns

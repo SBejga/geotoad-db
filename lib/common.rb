@@ -3,6 +3,8 @@
 require 'fileutils'
 require 'pathname'
 require 'time'
+require 'cgi'
+require 'yaml'
 
 module Common
   # pre 2014-10-14: @@prefs_url = 'http://www.geocaching.com/account/ManagePreferences.aspx'
@@ -17,7 +19,7 @@ module Common
   def getPreferences()
     debug2 "getting preferences"
     page = ShadowFetch.new(@@prefs_url)
-    page.localExpiry = 3 * 3600		# 3 hours
+    page.localExpiry = 12 * $HOUR
     data = page.fetch
     prefs = Hash.new
     current_select_name = nil
@@ -42,9 +44,18 @@ module Common
         end
       end
     }
+    # if something went wrong: remove cache file
+    if data !~ /username: "(.*?)",/
+      if $1.to_s.empty?
+        displayWarning "no username found, invalidating preferences"
+        page.invalidate()
+      end
+    end
     # 2014-10-14
     dateFormat = prefs['SelectedDateFormat']
     prefLanguage = prefs['SelectedCultureCode']
+    debug2 "dateFormat = #{dateFormat.inspect}"
+    debug2 "prefLanguage = #{prefLanguage.inspect}"
     # fallbacks
     if dateFormat.to_s.empty?
       dateFormat = prefs['ctl00$ContentBody$uxDateTimeFormat']
@@ -52,11 +63,12 @@ module Common
     if prefLanguage.to_s.empty?
       prefLanguage = prefs['ctl00$ContentBody$uxLanguagePreference']
     end
-    if ! dateFormat.to_s.empty?
-      @@dateFormat = dateFormat
+    if not dateFormat.to_s.empty?
+      @@dateFormat = CGI.unescapeHTML(dateFormat)
+    else
       debug2 "no date format set in preferences - this should never happen"
     end
-    if ! prefLanguage.to_s.empty?
+    if prefLanguage.to_s.empty?
       debug2 "no language set in preferences - this should never happen"
     end
     # get center location for distance
@@ -74,7 +86,7 @@ module Common
       my_lat = nil
       my_lon = nil
       page = ShadowFetch.new(@@homel_url)
-      page.localExpiry = 7 * 24 * 3600
+      page.localExpiry = 15 * $DAY
       data = page.fetch
       data.each_line{ |line|
         # var viewModel = [{"homeLocation":[51.9968514417669,-9.50660705566406], ...
@@ -95,7 +107,7 @@ module Common
 
   def getMyLogs()
     page = ShadowFetch.new(@@mylogs_url)
-    page.localExpiry = 12 * 3600		# 12 hours
+    page.localExpiry = 1 * $DAY
     data = page.fetch
     foundcount = 0
     logcount = 0
@@ -123,7 +135,7 @@ module Common
 
   def getMyTrks()
     page = ShadowFetch.new(@@mytrks_url)
-    page.localExpiry = 12 * 3600		# 12 hours
+    page.localExpiry = 1 * $DAY
     data = page.fetch
     logcount = 0
     # (like log count above)
@@ -160,6 +172,8 @@ module Common
 #ru-RU	Русский		Сегодня		Вчера		(n) дн.назад
 #fi-FI	Suomi		Tänään		Eilen		(n) päivää sitten
 #sv-SE	Svenska		Idag		Igår		för (n) dagar sedan
+#lb-LU	Lëtzebuergesch	Haut		Gëschter	virun (n) Deeg
+#sv-SI	Slovenščina	Danes		Včeraj		pred (n) dnevi(?)
 
 # date formats (last checked: 2014-12-01) M, MM num; MMM alpha
 # A	d.M.yyyy
@@ -196,10 +210,10 @@ module Common
     # patterns may be duplicated (Dansk/Norsk) intentionally
     case date
     # relative dates end in a "*"
-    when /^(Today|Avui|Dnes|I dag|Heute|Σήμερα|Täna|Hoy|Hier|Oggi|今日|오늘|Šodien|Ma|Vandaag|I dag|Dzisiaj|Hoje|Azi|Сегодня|Tänään|Idag)\*/i
+    when /^(Today|Avui|Dnes|I dag|Heute|Σήμερα|Täna|Hoy|Hier|Oggi|今日|오늘|Šodien|Ma|Vandaag|I dag|Dzisiaj|Hoje|Azi|Сегодня|Tänään|Idag|Haut|Danes)\*/i
       debug2 "date: Today"
       days_ago=0
-    when /^(Yesterday|Ahir|Včera|I går|Gestern|Χτές|Eile|Ayer|Aujourd.hui|Ieri|昨日|어제|Vakar|Tegnap|Gisteren|I går|Wczoraj|Ontem|Ieri|Вчера|Eilen|Igår)\*/i
+    when /^(Yesterday|Ahir|Včera|I går|Gestern|Χτές|Eile|Ayer|Aujourd.hui|Ieri|昨日|어제|Vakar|Tegnap|Gisteren|I går|Wczoraj|Ontem|Ieri|Вчера|Eilen|Igår|Gëschter|Včeraj)\*/i
       debug2 "date: Yesterday"
       days_ago=1
     # (any string ending with a * and a number in it)
@@ -266,17 +280,24 @@ module Common
       return nil
    end
     if not timestamp and days_ago
-      timestamp = Time.now - (days_ago * 3600 * 24)
+      timestamp = Time.now - (days_ago * $DAY)
+    else
+      # add 12 hours (day at noon)
+      # check: which time is used in found PQs?
+      timestamp += 12 * $HOUR
     end
     debug "Timestamp parsed as #{timestamp}"
     return timestamp
   end
 
   def daysAgo(timestamp)
+    # whatever may cause this...
+    return nil if not timestamp
     begin
-      return (Time.now - timestamp).to_i / 86400
+      # round time difference to full days
+      return (((Time.now - timestamp).to_i + 12 * $HOUR) / $DAY)
     rescue TypeError
-      displayWarning "Could not convert timestamp '#{timestamp}' to Time object."
+      displayWarning "Could not convert timestamp #{timestamp.inspect} to Time object."
       return nil
     end
   end
@@ -291,9 +312,9 @@ module Common
     # skip nils and empty strings
     dirs.compact.each do |dir|
       next if dir.empty?
-      if File.readable?(dir) && File.stat(dir).directory?
+      if File.readable?(dir) and File.stat(dir).directory?
         # write tests seem to be broken in Windows occasionally.
-        if dir =~ /^\w:/ or File.stat(dir).writable?
+        if dir =~ /^\w:/ or File.writable?(dir)
           return dir
         end
       end
@@ -495,7 +516,7 @@ module Common
   def cacheID(wid)
     if wid
       wp = wid.gsub(/^GC/, '')
-      if wp.length <= 4 && wp < 'G000'
+      if (wp.length <= 4) and (wp < 'G000')
         # base 16 is easy
         return wp.to_i(16)
       else
@@ -533,7 +554,7 @@ module Common
     return $mapping[wid]
   end
 
-  def appendMapping(wid, guid)
+  def appendMapping(wid, guid, src="")
     # this is a simple YAML file that can just be appended to
     return if $mapping[wid]
     $mapping[wid] = guid

@@ -2,7 +2,6 @@ template = {
 
   'html' => {
     'ext'  => 'html',
-    'mime' => 'text/html',
     'desc' => 'Simple HTML',
     'templatePre'   =>
       "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.0 Transitional//EN\">\n" +
@@ -34,6 +33,9 @@ template = {
       "<p><%wp.longdesc%></p>\n" +
       "</div>\n" +
       "<p><font color=\"#555555\"><i><%outEntity.hintdecrypt%></i></font></p>\n" +
+      "<div>" + # catch runaway stuff like <center>
+      "<p><font color=\"#003300\" size=\"-1\"><%wp.gallery%></font></p>\n" +
+      "</div>\n" +
       "<div>" + # catch runaway stuff like <center>
       "<p><font color=\"#330000\" size=\"-1\"><%out.htmllogs%></font></p>\n" +
       "</div>\n",

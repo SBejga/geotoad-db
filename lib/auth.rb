@@ -2,12 +2,15 @@
 ### Received cookies dissected and written to hash,
 ### cookies to be sent combined from hash
 
-module Auth
+require 'time'
+require 'lib/common'
+require 'lib/messages'
 
-  require 'yaml'
+module Auth
 
   include Common
   include Messages
+
   @@login_url = 'https://www.geocaching.com/login/'
   @@user = nil
   # cookie to be sent
@@ -26,12 +29,11 @@ module Auth
     if cookie
         saveCookie(cookie)
     else
-	debug "no cookie from login"
+        debug "no cookie from login"
     end
     logged_in = checkLoginScreen(cookie, user)
     debug "checkLoginScreen returns #{logged_in.inspect}"
     # get the current (set of) cookie(s) and pretend that login was successful
-#    cookie = loadCookie()
     return cookie
   end
 
@@ -42,7 +44,7 @@ module Auth
 
   def saveCookie(cookie)
     # don't do anything without a cookie
-    return if ! cookie
+    return if not cookie
     debug3 "saveCookie: merge #{hideCookie(cookie)}"
     # get individual cookies
     cookie.split(/; */).map{ |f|
@@ -104,15 +106,16 @@ module Auth
   def checkLoginScreen(cookie, user)
     # if we have no cookie we aren't logged in
     debug2 "checkLoginScreen with #{hideCookie(cookie)}"
-    return nil if ! cookie
+    return nil if not cookie
     @postVars = Hash.new
     page = ShadowFetch.new(@@login_url + 'default.aspx')
-    page.localExpiry = 1
+    page.localExpiry = -1
     debug3 "Checking validity of cookie #{hideCookie(cookie)}"
     data = page.fetch
     data.each_line do |line|
       case line
       #  <h3><span id="ctl00_ContentBody_lbUsername">Has iniciado sesión como <strong>Ölscheich99</strong></span></h3>
+      # Note: the only occurrence of utf-8 characters is in the comment above
       when /You are (logged|signed) in as/
         debug "Found login confirmation!"
         return true
@@ -145,7 +148,7 @@ module Auth
     @postVars = Hash.new
     # get login form
     page = ShadowFetch.new(@@login_url + 'default.aspx')
-    page.localExpiry = 1
+    page.localExpiry = -1
     data = page.fetch
     data.each_line do |line|
       case line
@@ -168,7 +171,7 @@ module Auth
     end
     # fill in form, and submit
     page = ShadowFetch.new(@postURL)
-    page.localExpiry = 0
+    page.localExpiry = -1
     @postVars['ctl00$ContentBody$tbUsername'] = user
     @postVars['ctl00$ContentBody$tbPassword'] = password
     @postVars['ctl00$ContentBody$cbRememberMe'] = 'on'
@@ -182,8 +185,7 @@ module Auth
     saveCookie(cookie)
     cookie = loadCookie()
     # spring 2016 replaced userid with other cookies
-    #if (cookie =~ /userid=/) && (cookie =~ /(ASP.NET_SessionId=\w+)/)
-    if (cookie =~ /gspkauth=/) && (cookie =~ /(ASP.NET_SessionId=\w+)/)
+    if (cookie =~ /gspkauth=/) and (cookie =~ /(ASP.NET_SessionId=\w+)/)
       debug "Cookie #{hideCookie(cookie)} looks good, rock on."
       return cookie
     else

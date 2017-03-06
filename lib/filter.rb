@@ -1,4 +1,6 @@
 require 'cgi'
+require 'lib/common'
+require 'lib/messages'
 
 class Filter
 
@@ -81,7 +83,7 @@ class Filter
     debug2 "filtering by sizeMin: #{size_name} (#{@@sizes[size_name]})"
     @waypointHash.delete_if{ |wid, values|
       debug3 "size check for #{wid}: #{@waypointHash[wid]['size']}"
-      @@sizes[@waypointHash[wid]['size']].to_i < @@sizes[size_name]
+      @@sizes[@waypointHash[wid]['size'].downcase].to_i < @@sizes[size_name]
     }
   end
 
@@ -89,7 +91,7 @@ class Filter
     debug2 "filtering by sizeMax: #{size_name} (#{@@sizes[size_name]})"
     @waypointHash.delete_if{ |wid, values|
       debug3 "size check for #{wid}: #{@waypointHash[wid]['size']}"
-      @@sizes[@waypointHash[wid]['size']].to_i > @@sizes[size_name]
+      @@sizes[@waypointHash[wid]['size'].downcase].to_i > @@sizes[size_name]
     }
   end
 
@@ -186,11 +188,10 @@ class Filter
   def travelBug
     debug2 "filtering by travelBug"
     @waypointHash.delete_if{ |wid, values|
-      @waypointHash[wid]['travelbug'].to_s.length < 1
+      @waypointHash[wid]['travelbug'].to_s.empty?
     }
   end
 
-  # owner and user filtering still look very fragile :(
   def ownerExclude(nick)
     debug2 "filtering by ownerExclude: #{nick}"
     @waypointHash.delete_if{ |wid, values|
@@ -201,7 +202,6 @@ class Filter
   def ownerInclude(nick)
     debug2 "filtering by ownerInclude: #{nick}"
     @waypointHash.delete_if{ |wid, values|
-    #  @waypointHash[wid]['creator'].to_s !~ /#{nick}/i
       CGI.unescapeHTML(@waypointHash[wid]['creator'].to_s) !~ /#{nick}/i
     }
   end
@@ -211,7 +211,7 @@ class Filter
     debug2 "filtering by notUser: #{nick}"
     @waypointHash.each_key{ |wid|
       debug3 "#{wid} visitors: #{@waypointHash[wid]['visitors']}"
-      if (@waypointHash[wid]['visitors'].include?(nick))
+      if @waypointHash[wid]['visitors'].include?(nick)
         debug3 " - #{nick} has visited #{wid} #{@waypointHash[wid]['name']}, filtering."
         @waypointHash.delete(wid)
       end
@@ -223,7 +223,7 @@ class Filter
     debug2 "filtering by User: #{nick}"
     @waypointHash.each_key{ |wid|
       debug3 "#{wid} visitors: #{@waypointHash[wid]['visitors']}"
-      if (! @waypointHash[wid]['visitors'].include?(nick))
+      if not @waypointHash[wid]['visitors'].include?(nick)
         debug3 " - #{nick} has not visited #{@waypointHash[wid]['name']}, filtering."
         @waypointHash.delete(wid)
       end
@@ -281,11 +281,11 @@ class Filter
       # I wanted to use delete_if, but I had run into a segfault in ruby 1.6.7/8 [helixblue]
       if string =~ /^\!(.*)/
         real_string = $1
-        if (! (@waypointHash[wid]['name'] !~ /#{real_string}/i) )
+        if (@waypointHash[wid]['name'] =~ /#{real_string}/i)
           @waypointHash.delete(wid)
         end
       else
-        if (! (@waypointHash[wid]['name'] =~ /#{string}/i) )
+        if (@waypointHash[wid]['name'] !~ /#{string}/i)
           @waypointHash.delete(wid)
         end
       end
@@ -298,11 +298,11 @@ class Filter
       cache = @waypointHash[wid]
       if string =~ /^\!(.*)/
         real_string = $1
-        if cache['longdesc'] =~ /#{real_string}/i || cache['shortdesc'] =~ /#{real_string}/i
+        if (cache['longdesc'] =~ /#{real_string}/i) or (cache['shortdesc'] =~ /#{real_string}/i)
           @waypointHash.delete(wid)
         end
       else
-        if ! (cache['longdesc'] =~ /#{string}/i || cache['shortdesc'] =~ /#{string}/i)
+        if (cache['longdesc'] !~ /#{string}/i) and (cache['shortdesc'] !~ /#{string}/i)
           @waypointHash.delete(wid)
         end
       end
@@ -323,7 +323,7 @@ class Filter
 
   # add a visitor to a cache. Used by the userlookup feeder.
   def addVisitor(wid, visitor)
-    if (@waypointHash[wid] && visitor)
+    if (@waypointHash[wid] and visitor)
       debug3 "Added visitor to #{wid}: #{visitor}"
       @waypointHash[wid]['visitors'] << visitor.downcase
     else

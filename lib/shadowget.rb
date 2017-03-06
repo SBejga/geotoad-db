@@ -3,15 +3,13 @@ require 'net/https'
 require 'fileutils'
 require 'uri'
 require 'cgi'
-require 'common'
-require 'messages'
-require 'auth'
+require 'time'
+require 'lib/common'
+require 'lib/messages'
+require 'lib/auth'
 
 # Does a webget, but stores a local directory with cached results ###################
 class ShadowFetch
-
-  attr_reader :data, :waypoints, :cookie
-  attr_accessor :url
 
   include Common
   include Messages
@@ -19,38 +17,43 @@ class ShadowFetch
 
   @@downloadErrors = 0
   @@remotePages = 0
-  @@minFileSize = 128 # was 6
+  # json sizes: error ~300 bytes, "publish" only ~700, +FTF ~1300
+  @@minFileSize = 512
+
+  attr_reader :data
+  attr_reader :cookie
+  attr_writer :maxFailures
+  attr_writer :localExpiry
+  attr_writer :useCookie
+  attr_writer :closingHTML
+  attr_writer :localFile
 
   # gets a URL, but stores it in a nice webcache
   def initialize (url)
     @url = url
     @remote = 0
-    @localExpiry = 5 * 86400		# 5 days
+    @localExpiry = 5 * $DAY		# Do not store if < 0
     @maxFailures = 10			#was 3
     @useCookie   = true
     @httpHeaders = {
-      'User-Agent'      => "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_2; en-US) AppleWebKit/532.9 (KHTML, like Gecko) Chrome/5.0.307.11 Safari/532.9",
+      'User-Agent'      => #'Mozilla/5.0 (X11; Linux i686; rv:45.0) Gecko/20100101 Firefox/45.0',
+                           'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_2; en-US) AppleWebKit/532.9 (KHTML, like Gecko) Chrome/5.0.307.11 Safari/532.9',
       'Accept'          => 'text/xml,application/xml,application/xhtml+xml,text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5',
       'Accept-Language' => 'en-us,en;q=0.5',
       'Accept-Charset'  => 'ISO-8859-1,utf-8;q=0.7,*;q=0.7'
     }
+    @closingHTML = true
+    @localFile   = nil
+    @cacheFile   = nil
+    @src         = nil
   end
 
-  def maxFailures=(maxfail)
-    debug "setting max failures to #{maxfail}"
-    @maxFailures = maxfail
+  def httpHeader=(keyvalue)
+    key, value = keyvalue
+    debug "set http header #{key}: #{value}"
+    @httpHeaders[key] = value
+    debug "http headers now: #{@httpHeaders.inspect}"
   end
-
-  def localExpiry=(expiry)
-    debug "setting local expiry to #{expiry}"
-    @localExpiry = expiry
-  end
-
-  def useCookie=(usecookie)
-    debug "use cookie: #{usecookie}"
-    @useCookie = usecookie
-  end
-
 
   def postVars=(vars)
     if vars
@@ -72,21 +75,22 @@ class ShadowFetch
   end
 
   def src
-    debug2 "src of last get was #{@@src}"
-    @@src
+    debug2 "src of last get was #{@src}"
+    @src
   end
 
   # returns the cache filename that the URL will be stored as
-  def cacheFile(url)
+  def cacheFile(orig_url)
+    url = orig_url.dup
     if (@postVars)
-      postdata=''
+      postdata = ''
       @postVars.each_key{ |key|
-        postdata = postdata + "#{key}=#{@postVars[key]}"
+        postdata << "#{key}=#{@postVars[key]}"
       }
 
       # we used to just keep the postdata in the filename, but DOS has
       # a 255 character limit on filenames. Lets hash it instead.
-      url = url + "-P=" + Digest::MD5.hexdigest(postdata)
+      url << "-P=" + Digest::MD5.hexdigest(postdata)
       debug3 "added post vars to url: #{url}"
     end
 
@@ -96,30 +100,33 @@ class ShadowFetch
 
     if fileParts[3]
       dir = File.join(fileParts[3..-2])
-      file = fileParts[-1]
-      localfile = File.join(host, dir, file)
+      if @localFile
+        file = @localFile
+      else
+        file = fileParts[-1]
+      end
+      @cacheFile = File.join(host, dir, file)
     end
 
     if url =~ /\/$/
-      localfile = File.join(localfile, 'index.html')
+      @cacheFile = File.join(@cacheFile, 'index.html')
     end
 
     # make a friendly filename
-    localfile.gsub!(/[^\/\w\.\-]/, "_")
-    localfile.gsub!(/_+/, "_")
+    @cacheFile.gsub!(/[^\/\w\.\-]/, "_")
+    @cacheFile.gsub!(/_+/, "_")
     if $CACHE_DIR
-      localfile = File.join($CACHE_DIR, localfile)
+      @cacheFile = File.join($CACHE_DIR, @cacheFile)
     else
-      localfile = File.join('', 'tmp', localfile)
+      @cacheFile = File.join('', 'tmp', @cacheFile)
     end
     # Windows users have a max of 255 characters I believe.
-    if (localfile.length > 250)
-      debug "truncating #{localfile} -- too long"
-      localfile = localfile.slice(0,250)
+    if (@cacheFile.length > 250)
+      debug "truncating \"#{@cacheFile}\" -- too long"
+      @cacheFile = @cacheFile[0..219]
     end
-
-    debug "cachefile: #{localfile}"
-    return localfile
+    debug2 "cachefile: #{@cacheFile}"
+    return @cacheFile
   end
 
   def invalidate
@@ -136,34 +143,61 @@ class ShadowFetch
     end
   end
 
+  # timestamp of local cache file (if any)
+  def fileTimestamp
+    timestamp = Time.at($ZEROTIME)
+    localfile = cacheFile(@url)
+    if localfile and File.exist?(localfile)
+      begin
+        timestamp = File.mtime(localfile)
+      rescue => e
+        # there's no cache file
+        debug "mtime failed: #{e}"
+      end
+    end
+    return timestamp
+  end
+
+  # file age (if file exists)
+  def fileAge
+    return (Time.now - fileTimestamp()).to_i
+  end
+
 
   # gets the file
   def fetch
-    @@src = nil
+    @src = nil
     time = Time.now
-    localfile = cacheFile(@url)
+    # this is kind of an ugly hack
+    if @localExpiry < 0
+      localfile = "/dev/null"
+    else
+      localfile = cacheFile(@url)
+    end
     localparts = localfile.split(/[\\\/]/)
     localdir = File.join(localparts[0..-2])  # basename sucks in Windows.
-    debug3 "====+ Fetch URL: #{url}"
+    debug3 "====+ Fetch URL: #{@url}"
     debug3 "====+ Fetch File: #{localfile}"
-
-    # expiry?
-    if (File.readable?(localfile))
+    if @localExpiry >= 0
+     # expired?
+     if (File.readable?(localfile))
       age = time.to_i - File.mtime(localfile).to_i
       if (age > @localExpiry)
         debug "local cache is #{age} (> #{@localExpiry}) sec old"
       elsif (File.size(localfile) <  @@minFileSize)
+        # this also takes care of failed JSON requests
         debug "local cache appears corrupt. removing.."
         invalidate
       else
         debug "local cache is only #{age} (<= #{@localExpiry}) sec old, using local file."
         @data = fetchLocal(localfile)
-        @@src = 'local'
+        @src = 'l'	#'local'
         # short-circuit out of here!
         return @data
       end
-    else
+     else
       debug "no local cache file found for #{localfile}"
+     end
     end
 
     # fetch a new version from remote
@@ -172,23 +206,23 @@ class ShadowFetch
     # check for valid closed html
     if not @data
       debug "we must not have a net connection, uh no"
-    elsif @data !~ /<\/html>\s*$/
+    elsif @data !~ /<\/html>\s*$/ and @closingHTML
       if @url =~ /geocaching\.com/
         displayWarning "No closing HTML tag found"
         #@data = nil
       end
     end
     if (@data)
-      @@src = 'remote'
+      @src = 'r'	#'remote'
       size = @data.length
     else
       if (File.readable?(localfile))
         debug "using local cache instead"
         @data = fetchLocal(localfile)
-        @@src = "local <offline>"
+        @src = "lo"	#'local <offline>'
         return @data
       else
-        @@src = nil
+        @src = nil
         debug "ERROR: #{@url} could not be fetched, even by cache"
         return nil
       end
@@ -202,7 +236,7 @@ class ShadowFetch
     # some magic to not overwrite a publicly viewable cdpf with PMO
     dowrite = false
     # protect against network failures
-    if @data and @data.length > @@minFileSize
+    if @data and @data.length >= @@minFileSize
       dowrite = true
       if @data =~ /be a Premium Member to view/
         # we got a PMO description
@@ -220,11 +254,14 @@ class ShadowFetch
             # we would lose information by overwriting, but have to concat
             dowrite = false
             @data = olddata + @data
-            @@src = 'local+remote'
+            @src = 'l+r'	#'local+remote'
           end #oldPMO
         end #oldcdpf
       end # newPMO
     end # valid @data
+    if @localExpiry < 0
+      dowrite = false
+    end
     if dowrite
       debug "writing #{localfile}"
       begin
@@ -259,7 +296,7 @@ class ShadowFetch
 
 
   def fetchRemote
-    @@remotePages = @@remotePages + 1
+    @@remotePages += 1
     randomizedSleep(@@remotePages)
     @httpHeaders['Referer'] = @url
     data = fetchURL(@url).to_s
@@ -425,56 +462,6 @@ class ShadowFetch
     end
 
     return resp.body
-  end
-
-  def fetchGuid (wid)
-    debug "Running GCCodeLookup for [#{wid}]"
-    # found via wireshark
-    # 20151202: must still be http, not https - may fail in the long run!
-    url_str = "http://www.geocaching.com/seek/cache_details.aspx/GCCodeLookup"
-    uri = URI.parse(url_str)
-    if ENV['HTTP_PROXY']
-      proxy = URI.parse(ENV['HTTP_PROXY'])
-      proxy_user, proxy_pass = uri.userinfo.split(/:/) if uri.userinfo
-      debug2 "Using proxy from environment: " + ENV['HTTP_PROXY']
-      http = Net::HTTP::Proxy(proxy.host, proxy.port, proxy_user, proxy_pass).new(uri.host, uri.port)
-    else
-      http = Net::HTTP.new(uri.host, uri.port)
-    end
-    query = uri.path
-    if @useCookie
-      @cookie = loadCookie()
-      if @cookie
-        debug3 "Added Cookie to #{url_str}: #{hideCookie(@cookie)}"
-        @httpHeaders['Cookie'] = @cookie
-      else
-        debug3 "No cookie to add to #{url_str}"
-      end
-    else
-      debug3 "Cookie not added to #{url_str}"
-    end
-    success = true
-    begin
-        postString = "{\"gcCode\":\"#{wid}\"}"
-        @httpHeaders['Content-Type'] = "application/json; charset=UTF-8"
-        @httpHeaders['Referer'] = "https://www.geocaching.com/seek/cache_details.aspx?wp=GC1"
-        resp = http.post(query, postString, @httpHeaders)
-    rescue Timeout::Error => e
-      success = false
-      displayWarning "Timeout #{uri.host}:#{uri.port}"
-    rescue Errno::ECONNREFUSED => e
-      success = false
-      displayWarning "Connection refused #{uri.host}:#{uri.port}"
-    rescue => e
-      success = false
-      displayWarning "Cannot connect to #{uri.host}:#{uri.port}: #{e}"
-    end
-    if success
-      debug3 "Response: #{resp.body}"
-      return resp.body
-    else
-      return nil
-    end
   end
 
 

@@ -4,12 +4,11 @@ template = {
   # Will produce XML validation errors because of <wpt> without lat=... lon=...
   'gpx-cgeo' => {
     'ext'  => 'gpx',
-    'mime' => 'text/ascii',
     'desc' => 'GPX for c:geo, with AddWpts, also unlocated',
     'templatePre'  =>
       "<?xml version=\'1.0\' encoding=\'UTF-8\' standalone=\'yes\' ?>\n" +
       "<gpx" +
-       " version=\"1.0\" creator=\"GeoToad\"" +
+       " version=\"1.0\" creator=\"GeoToad <%outEntity.version%>\"" +
        " xsi:schemaLocation=\"" +
          "http://www.topografix.com/GPX/1/0 http://www.topografix.com/GPX/1/0/gpx.xsd" +
         " http://www.groundspeak.com/cache/1/0/1 http://www.groundspeak.com/cache/1/0/1/cache.xsd" +
@@ -27,7 +26,7 @@ template = {
       ">\n",
     'templateWP'   =>
       "<wpt lat=\"<%out.latdatapad6%>\" lon=\"<%out.londatapad6%>\">\n" +
-      "  <time><%out.XMLDate%></time>\n" +
+      "  <time><%out.ctime%></time>\n" +
       "  <name><%outEntity.id%></name>\n" +
       "  <desc><%wpEntity.name%></desc>\n" +
       "  <url><%wp.url%></url>\n" +
@@ -39,22 +38,26 @@ template = {
       "  <groundspeak:placed_by><%wpEntity.creator%></groundspeak:placed_by>\n" +
       "  <groundspeak:owner><%wpEntity.creator%></groundspeak:owner>\n" +
       "  <groundspeak:type><%wp.fulltype%></groundspeak:type>\n" +
-      "  <groundspeak:container><%wp.size%></groundspeak:container>\n" +
+      "  <groundspeak:container><%out.csize%></groundspeak:container>\n" +
       "  <groundspeak:attributes>\n" +
-      "<%out.xmlAttrs%>" +
-      "  </groundspeak:attributes>\n" +
+       "<%out.xmlAttrs%>" +
+       "  </groundspeak:attributes>\n" +
       "  <groundspeak:difficulty><%wp.difficulty%></groundspeak:difficulty>\n" +
       "  <groundspeak:terrain><%wp.terrain%></groundspeak:terrain>\n" +
       "  <groundspeak:country><%wpEntity.country%></groundspeak:country>\n" +
       "  <groundspeak:state><%wpEntity.state%></groundspeak:state>\n" +
       "  <groundspeak:short_description html=\"True\">" +
        "<%out.premiumOnly%><%outEntity.warnArchiv%><%outEntity.warnAvail%>&lt;br /&gt;" +
-       "<%wpEntityCgeo.shortdesc%></groundspeak:short_description>\n" +
-      "  <groundspeak:long_description html=\"True\"><%wpEntityCgeo.longdesc%></groundspeak:long_description>\n" +
+       "<%wpEntityCgeo.shortdesc%>" +
+       "</groundspeak:short_description>\n" +
+      "  <groundspeak:long_description html=\"True\">" +
+       "<%wpEntityCgeo.longdesc%>" +
+       "<%wpEntityNone.gallery%>" +
+       "</groundspeak:long_description>\n" +
       "  <groundspeak:encoded_hints><%outEntityCgeo.hintdecrypt%></groundspeak:encoded_hints>\n" +
       "  <groundspeak:logs>\n" +
-      "<%out.gpxlogs%>" +
-      "  </groundspeak:logs>\n" +
+       "<%out.gpxlogs%>" +
+       "  </groundspeak:logs>\n" +
       "  <groundspeak:travelbugs><%out.xmlTrackables%></groundspeak:travelbugs>\n" +
       "  </groundspeak:cache>\n" +
       "  <gsak:wptExtension>\n" +

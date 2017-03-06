@@ -1,11 +1,12 @@
 require 'pathname'
 $THISDIR = File.dirname(File.realpath(__FILE__))
-$LOAD_PATH << File.join($THISDIR, '..')
-$LOAD_PATH << File.join($THISDIR, '..', 'lib')
 
-require 'country_state'
-require 'common'
-require 'messages'
+require 'getoptlong'
+require 'fileutils'
+require 'yaml'
+require 'lib/country_state'
+require 'lib/common'
+require 'lib/messages'
 
 class Input
 
@@ -13,23 +14,23 @@ class Input
   include Messages
 
   def initialize
-    # Originally, it  was @optHash. Rather than write a probably unneeded
-    # restore and save for it so that it can keep preferences between runs,
-    # I thought I would just make it class-wide instead of instance wide.
-
     resetOptions
     @configDir = findConfigDir
     @configFile = File.join(@configDir, 'config.yaml')
   end
 
   def resetOptions
+    # Originally, it was @optHash. Rather than write a probably unneeded
+    # restore and save for it so that it can keep preferences between runs,
+    # I thought I would just make it class-wide instead of instance wide.
+
     @@optHash = Hash.new
     # some default values.
     @@optHash['queryType'] = 'location'
   end
 
   def saveConfig
-    if (! File.exists?(@configDir))
+    if not File.exists?(@configDir)
       File.makedirs(@configDir)
     end
 
@@ -67,7 +68,7 @@ class Input
       [ "--attributeInclude",            "-a",    GetoptLong::REQUIRED_ARGUMENT ],
       [ "--attributeExclude",            "-A",    GetoptLong::REQUIRED_ARGUMENT ],
       [ "--travelBug",    "--trackable", "-b",    GetoptLong::NO_ARGUMENT ],
-# -B
+      [ "--getLogbook",  "--getLogBook", "-B",    GetoptLong::NO_ARGUMENT ],
       [ "--cacheType",         "--type", "-c",    GetoptLong::REQUIRED_ARGUMENT ],
       [ "--clearCache",     "--cleanup", "-C",    GetoptLong::NO_ARGUMENT ],
       [ "--difficultyMin",  "--minDiff", "-d",    GetoptLong::REQUIRED_ARGUMENT ],
@@ -75,7 +76,7 @@ class Input
       [ "--userInclude",     "--doneBy", "-e",    GetoptLong::REQUIRED_ARGUMENT ],
       [ "--userExclude",  "--notdoneBy", "-E",    GetoptLong::REQUIRED_ARGUMENT ],
 # -f (was funFactorMin)
-# -F (was finFactorMax)
+# -F (was funFactorMax)
       [ "--favFactorMin",    "--minFav", "-g",    GetoptLong::REQUIRED_ARGUMENT ],
       [ "--favFactorMax",    "--maxFav", "-G",    GetoptLong::REQUIRED_ARGUMENT ],
       [ "--help",                        "-h",    GetoptLong::NO_ARGUMENT ],
@@ -116,8 +117,11 @@ class Input
       [ "--noCacheDescriptions",         "-Y",    GetoptLong::NO_ARGUMENT ],
       [ "--includeDisabled",    "--bad", "-z",    GetoptLong::NO_ARGUMENT ],
       [ "--preserveCache",  "--keepOld", "-Z",    GetoptLong::NO_ARGUMENT ],
+# -[0-9]
     # no short option available
+      [ "--conditionWP",                          GetoptLong::REQUIRED_ARGUMENT ],
       [ "--includeArchived", "--gone",            GetoptLong::NO_ARGUMENT ],
+      [ "--imageLinks",   "--gallery",            GetoptLong::REQUIRED_ARGUMENT ],
       [ "--minLongitude", "--longMin",            GetoptLong::REQUIRED_ARGUMENT ],
       [ "--maxLongitude", "--longMax",            GetoptLong::REQUIRED_ARGUMENT ],
       [ "--minLatitude",  "--latMin",             GetoptLong::REQUIRED_ARGUMENT ],
@@ -152,7 +156,6 @@ class Input
           @@optHash['verbose'] = @@optHash['verbose'].to_i + 1
         elsif (@@optHash[opt] == "")
           # NO_ARG but already set: toggle
-          #@@optHash[opt] = nil
           @@optHash.delete(opt)
         else
           @@optHash[opt] = arg
@@ -196,13 +199,13 @@ class Input
     showMenu()
     saveConfig()
 
-    if (@@optHash['outDir'])
+    if @@optHash['outDir']
       @@optHash['output'] = @@optHash['outDir']
     else
       @@optHash['output'] = findOutputDir()
     end
 
-    if (@@optHash['outFile'])
+    if @@optHash['outFile']
       if @@optHash['output']
         @@optHash['output'] = File.join(@@optHash['output'], @@optHash['outFile'])
       else
@@ -228,13 +231,13 @@ class Input
     @@optHash.keys.sort.each{ |option|
       if ! @@optHash[option].to_s.empty? and ! hidden_opts.include?(option)
         if @@optHash[option] == 'X'
-          cmdline = cmdline + " --#{option}"
+          cmdline << " --#{option}"
         elsif not @@optHash[option].to_s.empty?
           # Omit the quotes if the argument is 'simple'
           if @@optHash[option].to_s =~ /^[\w\.:]+$/
-            cmdline = cmdline + " --#{option}=#{@@optHash[option]}"
+            cmdline << " --#{option}=#{@@optHash[option]}"
           else
-            cmdline = cmdline + " --#{option}=\'#{@@optHash[option]}\'"
+            cmdline << " --#{option}=\'#{@@optHash[option]}\'"
           end
         end
         # in the metric case, we must append "km" to the distance
@@ -248,9 +251,9 @@ class Input
       cmdline << " --"
     end
     if @@optHash['queryArg'].to_s =~ /^[\w\.:]+$/
-      cmdline = cmdline + " " + @@optHash['queryArg'].to_s
+      cmdline << " " + @@optHash['queryArg'].to_s
     else
-      cmdline = cmdline + " \'" + @@optHash['queryArg'].to_s + '\''
+      cmdline << " \'" + @@optHash['queryArg'].to_s + '\''
     end
     displayMessage "To use this query in the future, type:"
     displayMessage cmdline
@@ -270,7 +273,7 @@ class Input
 
     puts " -o [filename]          output file name (automatic otherwise)"
     puts " -x [format]            output format type, see list below (default: gpx)"
-    puts " -q [location|coord|user|owner|country|state|keyword|wid|guid]"
+    puts " -q [location|coord|user|owner|country|state|keyword|wid|guid|bookmark]"
     puts "                        query type (default: location)"
 
     puts " -d/-D [1.0-5.0]        difficulty minimum/maximum"
@@ -320,14 +323,10 @@ class Input
         puts ""
         column = 0
       end
-      if (outputDetails.formatRequirement(type) == 'gpsbabel')
-        type << '(+)'
-      elsif (outputDetails.formatRequirement(type) == 'cmconvert')
-        type << '(=)'
-      elsif (outputDetails.formatRequirement(type) == 'iconv')
-        type << '(%)'
-      end
-      printf(" %-13.13s", type)
+      type << '(+)' if (outputDetails.formatRequirement(f) =~ /gpsbabel/)
+      type << '(=)' if (outputDetails.formatRequirement(f) =~ /cmconvert/)
+      type << '(%)' if (outputDetails.formatRequirement(f) =~ /iconv/)
+      printf(" %-15.15s", type)
       column += 1
     }
     puts ""
@@ -401,7 +400,7 @@ class Input
         msg = "disabled"
       end
       puts "** Verbose (debug) mode #{msg}, (v) to change"
-      print "-- Enter menu number, (s) to start, (R) to reset, or (Q) to exit --> "
+      print "-- Enter menu number, (s) to start, (R) to reset, or (X) to exit --> "
       answer = $stdin.gets.chop
       puts ""
 
@@ -424,7 +423,7 @@ class Input
   8. By waypoint ID
   9. By waypoint GUID
 
-", ['location', 'coord', 'user', 'owner', 'country', 'state', 'keyword', 'wid', 'guid'], 'location')
+", ['location', 'coord', 'user', 'owner', 'country', 'state', 'keyword', 'wid', 'guid', 'bookmark'], 'location')
 
         # Clear the query argument if the type has changed.
         if @@optHash['queryType'] != chosen
@@ -450,6 +449,9 @@ class Input
         when 'guid'
           @@optHash['queryArg'] = ask('Enter a list of guid\'s (separated by commas)', 'NO_DEFAULT').gsub(/, */, '|')
 
+        when 'bookmark'
+          @@optHash['queryArg'] = ask('Enter a list of bookmark guid\'s (separated by commas)', 'NO_DEFAULT').gsub(/, */, '|')
+
         when 'user'
           @@optHash['queryArg'] = ask('Enter a list of users (separated by commas)', 'NO_DEFAULT').gsub(/, */, '|')
             @@optHash['queryArg'] = convertEscapedHex(@@optHash['queryArg'])
@@ -472,8 +474,8 @@ class Input
             print coordset.to_s + ": "
             coord = $stdin.gets.chomp
             if coord != 'q'
-              query = query + coord + '|'
-              coordset = coordset + 1
+              query << coord + '|'
+              coordset += 1
             end
           end
 
@@ -492,8 +494,8 @@ class Input
             print keyset.to_s + ": "
             key = $stdin.gets.chomp
             if key != 'q'
-              query = query + key + '|'
-              keyset = keyset + 1
+              query << key + '|'
+              keyset += 1
             end
           end
 
@@ -608,11 +610,10 @@ class Input
         puts "List of Output Formats [Extension] {Requirement}: "
         $validFormats = outputDetails.formatList.sort
         $validFormats.each{ |type|
-          desc = ""
           ext  = "[" + outputDetails.formatExtension(type) + "]"
-          desc << outputDetails.formatDesc(type)
+          desc = outputDetails.formatDesc(type)
           req  = outputDetails.formatRequirement(type)
-          if (req)
+          if req
             desc << " {" + req + "}"
           end
           printf("%-13.13s%6.6s %s\n", type, ext, desc)
@@ -623,7 +624,7 @@ class Input
 
       when '25'
         @@optHash['outFile'] = ask('What filename would you like to output to? (press enter for automatic)', nil)
-        if (@@optHash['outFile'])
+        if @@optHash['outFile']
           @@optHash['outFile'].gsub!(/\\/,  '/')
         end
         # if (full) path: split into parts
@@ -639,15 +640,15 @@ class Input
           @@optHash['outDir'].gsub!(/\\/,  '/')
 
           if File.exists?(@@optHash['outDir'])
-            if (! File.directory?(@@optHash['outDir']))
+            if not File.directory?(@@optHash['outDir'])
               puts " ***  Although existing, this is no directory. Trouble ahead!"
               print "Press enter to continue: "
-              answer=$stdin.gets
+              answer = $stdin.gets
             end
-            if (! File.writable?(@@optHash['outDir']))
+            if not File.writable?(@@optHash['outDir'])
               puts " ***  Although existing, this is not writable. Trouble ahead!"
               print "Press enter to continue: "
-              answer=$stdin.gets
+              answer = $stdin.gets
             end
           else
             answer = ask("This directory does not exist. Would you like me to create it?", 'n')
@@ -657,7 +658,7 @@ class Input
               rescue
                 puts " ***  Directory cannot be created. Trouble ahead!"
                 print "Press enter to continue: "
-                answer=$stdin.gets
+                answer = $stdin.gets
               end
             else
               puts "Fine, suit yourself."
@@ -667,13 +668,13 @@ class Input
         end
 
       when 's', 'q'
-        if (! @@optHash['queryArg']) || (@@optHash['queryArg'].size < 1)
+        if @@optHash['queryArg'].to_s.empty?
           puts " ***  You cannot start till you specify what #{@@optHash['queryType']} data you would like to search with"
           print "Press enter to continue: "
-          answer=$stdin.gets
+          answer = $stdin.gets
         end
         # in case of country or state query, return numeric id only
-        if (@@optHash['queryType'] == 'country' || @@optHash['queryType'] == 'state')
+        if (@@optHash['queryType'] == 'country') or (@@optHash['queryType'] == 'state')
           @@optHash['queryArg'] = @@optHash['queryArg'].to_s.split(/=/)[0]
         end
 
@@ -695,7 +696,7 @@ class Input
         level = (level == 0) ? nil : level
         @@optHash['verbose'] = level
 
-      when 'x', 'X', 'Q'
+      when 'X'
         puts "Cya!"
         exit
 
@@ -709,12 +710,12 @@ class Input
 
   def ask(string, default)
     answer = nil
-    while not answer or answer.length() == 0
+    while answer.to_s.empty?
       print string + ": "
       answer = $stdin.gets.chomp
       answer.gsub!(/ +$/, '')
 
-      if not answer or answer.length() == 0
+      if answer.to_s.empty?
         if default == 'NO_DEFAULT'
           puts "You must supply an answer, there is no default!"
         else
@@ -819,21 +820,25 @@ class Input
     state = nil
     c = CountryState.new()
     while not state
-      try_state = ask("Which state do you want to search for (id, or country/state pattern)?", nil)
+      try_state = ask("Which state do you want to search for (id, or [country]/[state] pattern)?", nil)
       # numerical value? state 1 doesn't exist
       if try_state.to_i > 1
         state = try_state.to_i
       else
         # get from country's list
         try_country = try_state.to_s.split(/\//)[0]
-        if try_country.nil? or try_country.empty?
-          puts "** No country pattern. Use \"Country/State\""
+        if try_country.to_s.empty?
+          puts "** No country pattern, trying to match all"
+          try_country = '.'
+        end
+        try_state = try_state.split(/\//)[1]
+        if try_state.to_s.empty?
+          puts "** No state pattern, using \".\" to match all"
+          try_state = '.'
+        end
+        if (try_country == '.')
+          country = "1=(Unknown)"
         else
-          try_state = try_state.split(/\//)[1]
-          if try_state.nil? or try_state.empty?
-            puts "** No state pattern, using \".\" to match all"
-            try_state = '.'
-          end
           # match country from list
           countries = c.findMatchingCountry(try_country)
           if countries.length == 1
@@ -848,6 +853,7 @@ class Input
           else
             puts "** No country matches found. Try something else!"
           end
+        end
           if country
             puts "Searching in country #{country}"
             country = country.split(/=/)[0]
@@ -865,7 +871,7 @@ class Input
               puts "** No state matches found. Try something else!"
             end
           end
-        end
+        #end
       end
     end
     if state
@@ -938,35 +944,35 @@ class Input
   def guessQueryType(type)
 
     case type
-    when /auto/
+    when /^auto/ #(obsolete?)
       return 'location'
-    when /loc/
-      return 'location'
-    when /zip/
-      return 'location'
-    when /country/
-      return 'country'
-    when /state/
-      return 'state'
-    when /province/
-      return 'state'
-    when /coo/
+    when /^boo/ #bookmark
+      return 'bookmark'
+    when /^coo/ #coordinates
       return 'coord'
-    when /wid/
-      return 'wid'
-    when /waypoint/
-      return 'wid'
-    when /guid/
+    when /^cou/ #country_id
+      return 'country'
+    when /^gu/ #guid
       return 'guid'
-    when /user/
-      return 'user'
-    when /own/
-      return 'owner'
-    when /key/
+    when /^key/ #keyword
       return 'keyword'
+    when /^loc/ #location
+      return 'location'
+    when /^own/ #owner
+      return 'owner'
+    when /^prov/ #province
+      return 'state'
+    when /^sta/ #state_id
+      return 'state'
+    when /^us/ #user
+      return 'user'
+    when /^w/ #wid,waypoint
+      return 'wid'
+    when /^zip/ #zipcode
+      return 'location'
     end
-    # Could not guess
-    return nil
+    # Could not guess: fallback to auto
+    return 'location'
   end
 
 end

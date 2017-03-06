@@ -1,15 +1,16 @@
 # collect template definitions
 
-require 'common'
-require 'messages'
+require 'fileutils'
 require 'pathname'
+require 'lib/common'
+require 'lib/messages'
 
 class Templates
 
   include Common
   include Messages
 
-  $FORMATS = Hash.new
+  $allFormats = Hash.new
 
   def initialize
     # default template directory
@@ -17,9 +18,7 @@ class Templates
     owntempdir = File.join(findConfigDir(), 'templates')
     [systempdir, owntempdir].each{ |dir|
       begin
-        if ! (File.directory?(dir) && FileTest.readable?(dir))
-          next
-        end
+        next if not (File.directory?(dir) && FileTest.readable?(dir))
         # now read all templates from there
         displayMessage "Templates: #{dir}"
         Dir.entries(dir).sort.each{ |fn|
@@ -32,7 +31,7 @@ class Templates
                   # ready to catch syntax errors
                   newentry = eval(s)
                   # add/replace in hash
-                  $FORMATS.merge!(newentry)
+                  $allFormats.merge!(newentry)
                 rescue SyntaxError => e
                   displayWarning "#{file} - syntax error, skipping:"
                   displayInfo    "  #{e}"
@@ -47,7 +46,7 @@ class Templates
         displayWarning "#{dir} causing problems: #{e}"
       end
     }
-    displayInfo "#{$FORMATS.keys.length.to_s.rjust(6)} templates total"
+    displayInfo "#{$allFormats.keys.length.to_s.rjust(6)} templates total"
   end
 
 end

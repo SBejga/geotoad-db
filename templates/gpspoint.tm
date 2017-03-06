@@ -4,11 +4,10 @@ template = {
   # see also http://mirror.rosalab.ru/rosa/rosa2012.1/repository/SRPMS/contrib/release/gpspoint-2.030521-7.src.rpm
   'gpspoint' => {
     'ext'          => 'gpd',
-    'mime'         => 'application/gpspoint',
     'desc'         => 'GpsPoint data file',
     'templatePre'  =>
       "GPSPOINT DATA FILE\ntype=\"fileinfo\"  version=\"1.00\"\n" +
-      "type=\"programinfo\" program=\"geotoad\" version=\"0.0\"\n" +
+      "type=\"programinfo\" program=\"geotoad\" version=\"<%outEntity.version%>\"\n" +
       "type=\"waypointlist\"\n",
     'templateWP'   =>
       "type=\"waypoint\" " +
@@ -22,7 +21,6 @@ template = {
   # use gpsbabel to create gpspoint file from gpx
   'gpspoint2' => {
     'ext'          => 'gpd',
-    'mime'         => 'application/gpspoint',
     'desc'         => 'GpsPoint data file (by gpsbabel)',
     'required'     => 'gpsbabel',
     'filter_src'   => 'gpx',
