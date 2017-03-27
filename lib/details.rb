@@ -89,6 +89,7 @@ class CacheDetails
     # get guid from log entry page
     guid = getRemoteMapping2(wid)
     return [guid, '2'] if guid
+    displayWarning "Could not map #{wid} to GUID"
     return [nil, '0']
   end
 
@@ -602,7 +603,7 @@ class CacheDetails
             # cache has moved, description and hint may be inaccurate - set mark
             movedDistance, movedDirection = geoDistDir(oldlat, oldlon, newlat, newlon)
             movedDistance = (movedDistance.to_f * 1000 * $MILE2KM).round
-            displayInfo "Moved from #{oldlat}/#{oldlon} to #{newlat}/#{newlon} (#{movedDistance}m@#{movedDirection})"
+            debug "Moved from #{oldlat}/#{oldlon} to #{newlat}/#{newlon} (#{movedDistance}m@#{movedDirection})"
             cache['moved'] = true
           end
         end

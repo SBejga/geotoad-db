@@ -98,7 +98,7 @@ syntax: geotoad [options] <search:search2:search3>
  -m [delimiters]        set delimiter(s) (default "|:") for multiple selections
  -o [filename]          output file name (automatic otherwise)
  -x [format]            output format type, see list below (default: gpx)
- -q [location|coord|user|owner|country|state|keyword|wid|guid]
+ -q [location|coord|user|owner|country|state|keyword|wid|guid|bookmark]
                         query type (default: location)
  -d/-D [1.0-5.0]        difficulty minimum/maximum
  -t/-T [1.0-5.0]        terrain minimum/maximum
